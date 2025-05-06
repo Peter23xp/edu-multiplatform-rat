@@ -274,7 +274,7 @@ Pour compléter l'aspect éducatif, voici comment détecter et se défendre cont
 - Utilisez des outils de chiffrement du clavier pour prévenir le keylogging
 - Implémentez l'authentification multi-facteurs 
 
-## �� Comment Contribuer
+## 🎉 Comment Contribuer
 
 🎉 **Ce projet est ouvert à la collaboration !** Que vous soyez développeur, pentester ou étudiant, vos idées sont les bienvenues.
 
@@ -301,8 +301,15 @@ Toutes les contributions doivent respecter l'objectif pédagogique du projet et 
 
 Ce projet est distribué sous licence MIT. Voir [LICENSE](LICENSE) pour plus d'informations.
 
+## 👤 Créateur
+
+Cet outil éducatif a été développé par **Peter Akilimali**.
+
+Pour plus d'informations sur l'auteur et ses déclarations, consultez [AUTHOR.md](AUTHOR.md).
+
 ---
 
 <div align="center">
-  <strong>🛡️ Apprenez la sécurité offensive pour mieux vous défendre. Ce projet est une ressource éducative pour comprendre les menaces et améliorer votre posture de sécurité. ��️</strong>
+  <strong>🛡️ Apprenez la sécurité offensive pour mieux vous défendre. Ce projet est une ressource éducative pour comprendre les menaces et améliorer votre posture de sécurité. 🛡️</strong>
+  <p>© 2025 Peter Akilimali. Tous droits réservés.</p>
 </div> 
