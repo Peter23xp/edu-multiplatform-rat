@@ -157,6 +157,7 @@ def handle_new_client(client_socket, address, auth_user, auth_pass, key):
 
         with clients_lock:
             clients.pop(cid, None)
+        client_socket.close()
 
     except Exception as e:
         try:

