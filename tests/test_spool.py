@@ -24,3 +24,8 @@ def test_ack_removes_file(tmp_path):
 def test_survives_empty_dir(tmp_path):
     s = Spool(tmp_path)
     assert s.pending() == []
+
+def test_ack_ignores_missing_file(tmp_path):
+    s = Spool(tmp_path)
+    # Should not raise even if file doesn't exist
+    s.ack("nonexistent_12345.json")

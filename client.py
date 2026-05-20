@@ -11,6 +11,7 @@ import sys
 import json
 import logging
 import io
+import base64
 import threading
 
 SERVER_HOST = "127.0.0.1"
@@ -151,7 +152,9 @@ def _clipboard_flush_thread(clipboard_monitor, spool, stop_event):
     """Monitors clipboard and flushes to spool on change."""
     last_sent = ""
     while not stop_event.is_set():
-        time.sleep(2)
+        stop_event.wait(2)
+        if stop_event.is_set():
+            break
         if not clipboard_monitor.history:
             continue
         latest = clipboard_monitor.history[-1].get("content", "")
@@ -191,9 +194,8 @@ def _screenshot_auto_thread(spool, stop_event, interval=300):
         if not SCREENSHOT_AVAILABLE:
             continue
         try:
-            import io as _io, base64
             screenshot = pyautogui.screenshot()
-            buf = _io.BytesIO()
+            buf = io.BytesIO()
             screenshot.save(buf, format="PNG")
             b64 = base64.b64encode(buf.getvalue()).decode()
             spool.push("screenshot", {"data_b64": b64, "time": time.strftime("%Y-%m-%dT%H:%M:%S")})
