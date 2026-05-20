@@ -331,11 +331,16 @@ class RATServerGUI:
     def _setup_dashboard(self, parent):
         parent.configure(bg=self.bg_main)
         stats_row = tk.Frame(parent, bg=self.bg_main)
-        stats_row.pack(fill="x", pady=(0, 8))
-        self._stat_clients = self._make_stat_card(stats_row, "0",    "CLIENTS", self.success_color, self._popup_clients)
-        self._stat_server  = self._make_stat_card(stats_row, "OFF",  "SERVEUR", self.error_color,   self._popup_server)
-        self._stat_alerts  = self._make_stat_card(stats_row, "0",    "ALERTES", self.warning_color, self._popup_alerts)
-        self._stat_port    = self._make_stat_card(stats_row, "4444", "PORT",    self.accent_color,  self._popup_port)
+        stats_row.pack(fill="x", pady=(0, 0))
+        self._stat_clients = self._make_stat_card(stats_row, "0",    "CLIENTS", self.success_color, lambda: self._toggle_detail("clients"))
+        self._stat_server  = self._make_stat_card(stats_row, "OFF",  "SERVEUR", self.error_color,   lambda: self._toggle_detail("server"))
+        self._stat_alerts  = self._make_stat_card(stats_row, "0",    "ALERTES", self.warning_color, lambda: self._toggle_detail("alerts"))
+        self._stat_port    = self._make_stat_card(stats_row, "4444", "PORT",    self.accent_color,  lambda: self._toggle_detail("port"))
+
+        # Inline detail panel — hidden by default, shown between cards and client list
+        self._detail_panel = tk.Frame(parent, bg=self.bg_card,
+                                      highlightbackground=self.accent_color, highlightthickness=1)
+        self._detail_panel_active = None  # which card is open
 
         clients_frame = tk.Frame(parent, bg=self.bg_card,
                                   highlightbackground=self.border_color, highlightthickness=1)
@@ -1260,118 +1265,128 @@ DÉMARRAGE RAPIDE:
     # STAT CARD POPUPS
     # ═══════════════════════════════════════════════════════════════════
 
-    def _popup_base(self, title, width=480, height=340):
-        win = tk.Toplevel(self.root)
-        win.title(title)
-        win.configure(bg=self.bg_card)
-        win.geometry(f"{width}x{height}")
-        win.resizable(True, True)
-        win.transient(self.root)
-        win.grab_set()
-        hdr = tk.Frame(win, bg=self.bg_sidebar)
+    # ═══════════════════════════════════════════════════════════════════
+    # INLINE DETAIL PANEL
+    # ═══════════════════════════════════════════════════════════════════
+
+    def _toggle_detail(self, which):
+        """Show or hide the inline detail panel below the stat cards."""
+        if self._detail_panel_active == which:
+            # Same card clicked again → close
+            self._detail_panel.pack_forget()
+            self._detail_panel_active = None
+            return
+        self._detail_panel_active = which
+        # Clear previous content
+        for w in self._detail_panel.winfo_children():
+            w.destroy()
+        # Header bar
+        hdr = tk.Frame(self._detail_panel, bg=self.bg_sidebar)
         hdr.pack(fill="x")
-        tk.Label(hdr, text=title, fg=self.accent_color, bg=self.bg_sidebar,
-                 font=("Segoe UI", 11, "bold"), padx=14, pady=8).pack(side="left")
+        titles = {"clients": "Clients connectés", "server": "Statut du serveur",
+                  "alerts": "Journal des alertes", "port": "Configuration du port"}
+        tk.Label(hdr, text=titles.get(which, ""), fg=self.accent_color,
+                 bg=self.bg_sidebar, font=("Segoe UI", 10, "bold"),
+                 padx=12, pady=6).pack(side="left")
         tk.Button(hdr, text="✕", fg=self.text_muted, bg=self.bg_sidebar,
                   activebackground=self.error_color, activeforeground="white",
-                  relief="flat", font=("Segoe UI", 10), bd=0, padx=10,
-                  command=win.destroy).pack(side="right")
-        body = tk.Frame(win, bg=self.bg_card)
-        body.pack(fill="both", expand=True, padx=14, pady=10)
-        return win, body
+                  relief="flat", font=("Segoe UI", 9), bd=0, padx=10,
+                  command=lambda: self._toggle_detail(which)).pack(side="right")
+        body = tk.Frame(self._detail_panel, bg=self.bg_card)
+        body.pack(fill="both", expand=True, padx=12, pady=8)
+        # Render content
+        render = {"clients": self._render_detail_clients,
+                  "server":  self._render_detail_server,
+                  "alerts":  self._render_detail_alerts,
+                  "port":    self._render_detail_port}
+        render[which](body)
+        # Show panel between stats and client list
+        self._detail_panel.pack(fill="x", pady=(4, 4),
+                                before=self._detail_panel.master.winfo_children()[1])
 
-    def _popup_row(self, parent, key, value, editable=False, on_save=None):
+    def _detail_row(self, parent, key, value):
         row = tk.Frame(parent, bg=self.bg_card)
-        row.pack(fill="x", pady=3)
+        row.pack(fill="x", pady=2)
         tk.Label(row, text=key, fg=self.text_muted, bg=self.bg_card,
                  font=("Segoe UI", 9), width=20, anchor="w").pack(side="left")
-        if editable:
-            var = tk.StringVar(value=str(value))
-            entry = tk.Entry(row, textvariable=var, bg=self.bg_input, fg=self.text_color,
-                             insertbackground=self.text_color, relief="flat",
-                             font=("Consolas", 9), width=18)
-            entry.pack(side="left", padx=(0, 4))
-            ttk.Button(row, text="Sauver",
-                       command=lambda: on_save(var.get())).pack(side="left")
-        else:
-            tk.Label(row, text=str(value), fg=self.text_color, bg=self.bg_card,
-                     font=("Consolas", 9), anchor="w").pack(side="left")
+        tk.Label(row, text=str(value), fg=self.text_color, bg=self.bg_card,
+                 font=("Consolas", 9), anchor="w").pack(side="left")
 
-    def _popup_clients(self):
+    def _render_detail_clients(self, body):
         with self.lock:
             snapshot = dict(self.clients)
-        win, body = self._popup_base("Clients connectés", width=560, height=max(200, 80 + len(snapshot) * 50))
         if not snapshot:
             tk.Label(body, text="Aucun client connecté", fg=self.text_muted,
-                     bg=self.bg_card, font=("Segoe UI", 10)).pack(pady=20)
+                     bg=self.bg_card, font=("Segoe UI", 10)).pack(pady=10)
             return
-        # Header row
         hrow = tk.Frame(body, bg=self.bg_input)
         hrow.pack(fill="x", pady=(0, 4))
-        for txt, w in (("#", 4), ("IP", 16), ("Node", 14), ("OS", 12), ("Chiffrement", 12), ("", 8)):
+        for txt, w in (("#", 4), ("IP", 15), ("Node", 14), ("OS", 14), ("Chiffr.", 10)):
             tk.Label(hrow, text=txt, fg=self.text_muted, bg=self.bg_input,
-                     font=("Segoe UI", 8, "bold"), width=w, anchor="w").pack(side="left", padx=2)
+                     font=("Segoe UI", 8, "bold"), width=w, anchor="w").pack(side="left", padx=3)
         for cid, c in snapshot.items():
             info = c.get("info", "")
-            node = os = release = "?"
+            node = os_name = release = "?"
             for part in info.split("|"):
-                part = part.strip()
-                if part.startswith("Node:"):    node    = part[5:].strip()
-                elif part.startswith("System:"): os      = part[7:].strip()
-                elif part.startswith("Release:"): release = part[8:].strip()
-            enc = "AES-256" if c.get("key") else "Aucun"
-            marker = " [actif]" if cid == self.current_client_id else ""
-            r = tk.Frame(body, bg=self.bg_card, highlightbackground=self.border_color, highlightthickness=1)
-            r.pack(fill="x", pady=2)
-            color = self.accent_color if cid == self.current_client_id else self.text_color
-            for txt, w in ((f"#{cid}{marker}", 4), (c["address"][0], 16), (node, 14),
-                           (f"{os} {release}", 12), (enc, 12)):
-                tk.Label(r, text=txt, fg=color, bg=self.bg_card,
-                         font=("Consolas", 9), width=w, anchor="w").pack(side="left", padx=4)
-            btn_frame = tk.Frame(r, bg=self.bg_card)
-            btn_frame.pack(side="right", padx=4)
-            ttk.Button(btn_frame, text="Sélect.",
-                       command=lambda c=cid, w=win: (self._select_cid(c), w.destroy())
+                p = part.strip()
+                if p.startswith("Node:"):     node     = p[5:].strip()
+                elif p.startswith("System:"): os_name  = p[7:].strip()
+                elif p.startswith("Release:"): release = p[8:].strip()
+            enc = "AES-256" if c.get("key") else "—"
+            active = cid == self.current_client_id
+            r = tk.Frame(body, bg=self.bg_input if active else self.bg_card,
+                         highlightbackground=self.accent_color if active else self.border_color,
+                         highlightthickness=1)
+            r.pack(fill="x", pady=1)
+            clr = self.accent_color if active else self.text_color
+            for txt, w in ((f"#{cid}", 4), (c["address"][0], 15), (node, 14),
+                           (f"{os_name} {release}", 14), (enc, 10)):
+                tk.Label(r, text=txt, fg=clr, bg=r.cget("bg"),
+                         font=("Consolas", 9), width=w, anchor="w").pack(side="left", padx=3)
+            bf = tk.Frame(r, bg=r.cget("bg"))
+            bf.pack(side="right", padx=4)
+            ttk.Button(bf, text="Sélect.",
+                       command=lambda c=cid: (self._select_cid(c), self._toggle_detail("clients"))
                        ).pack(side="left", padx=2)
-            ttk.Button(btn_frame, text="Kick", style="Danger.TButton",
-                       command=lambda c=cid, w=win: (self._kick_cid(c), w.destroy())
+            ttk.Button(bf, text="Kick", style="Danger.TButton",
+                       command=lambda c=cid: (self._kick_cid(c), self._toggle_detail("clients"))
                        ).pack(side="left", padx=2)
 
-    def _popup_server(self):
-        win, body = self._popup_base("Statut du serveur", width=380, height=240)
+    def _render_detail_server(self, body):
         running = self.server_socket is not None
         status_txt = "EN ÉCOUTE" if running else "ARRÊTÉ"
         status_clr = self.success_color if running else self.error_color
-        tk.Label(body, text=status_txt, fg=status_clr, bg=self.bg_card,
-                 font=("Segoe UI", 16, "bold")).pack(pady=(6, 10))
-        sep = tk.Frame(body, bg=self.border_color, height=1)
-        sep.pack(fill="x", pady=(0, 8))
-        host = self.server_host.get()
-        port = self.server_port.get()
-        self._popup_row(body, "Adresse d'écoute", f"{host}:{port}")
-        self._popup_row(body, "Clients actifs", len(self.clients))
-        self._popup_row(body, "Total connexions", self._total_connections)
+        top = tk.Frame(body, bg=self.bg_card)
+        top.pack(fill="x", pady=(0, 6))
+        tk.Label(top, text=status_txt, fg=status_clr, bg=self.bg_card,
+                 font=("Segoe UI", 13, "bold")).pack(side="left")
+        tk.Frame(body, bg=self.border_color, height=1).pack(fill="x", pady=(0, 6))
+        self._detail_row(body, "Adresse d'écoute", f"{self.server_host.get()}:{self.server_port.get()}")
+        self._detail_row(body, "Clients actifs", len(self.clients))
+        self._detail_row(body, "Total connexions", self._total_connections)
         if self._server_start_time:
             import datetime
             uptime = int(time.time() - self._server_start_time)
             h, m, s = uptime // 3600, (uptime % 3600) // 60, uptime % 60
             started = datetime.datetime.fromtimestamp(self._server_start_time).strftime("%H:%M:%S")
-            self._popup_row(body, "Démarré à", started)
-            self._popup_row(body, "Uptime", f"{h:02d}:{m:02d}:{s:02d}")
+            self._detail_row(body, "Démarré à", started)
+            self._detail_row(body, "Uptime", f"{h:02d}:{m:02d}:{s:02d}")
         else:
-            self._popup_row(body, "Démarré à", "—")
+            self._detail_row(body, "Démarré à", "—")
 
-    def _popup_alerts(self):
-        win, body = self._popup_base("Journal des alertes", width=520, height=360)
-        tk.Label(body, text=f"{self._alert_count} alerte(s) au total",
-                 fg=self.warning_color, bg=self.bg_card,
-                 font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(0, 6))
+    def _render_detail_alerts(self, body):
+        top = tk.Frame(body, bg=self.bg_card)
+        top.pack(fill="x", pady=(0, 6))
+        tk.Label(top, text=f"{self._alert_count} alerte(s)", fg=self.warning_color,
+                 bg=self.bg_card, font=("Segoe UI", 9, "bold")).pack(side="left")
+        ttk.Button(top, text="Effacer", style="Danger.TButton",
+                   command=self._clear_alerts).pack(side="right")
         frame = tk.Frame(body, bg=self.bg_console,
                          highlightbackground=self.border_color, highlightthickness=1)
         frame.pack(fill="both", expand=True)
         txt = tk.Text(frame, bg=self.bg_console, fg=self.text_color,
                       font=("Consolas", 9), relief="flat", wrap="word",
-                      state="normal", borderwidth=0, highlightthickness=0)
+                      height=6, borderwidth=0, highlightthickness=0)
         sb = tk.Scrollbar(frame, orient="vertical", command=txt.yview,
                           bg=self.bg_sidebar, troughcolor=self.bg_main)
         sb.pack(side="right", fill="y")
@@ -1383,17 +1398,11 @@ DÉMARRAGE RAPIDE:
             txt.insert("end", "Aucune alerte enregistrée.\n")
         else:
             for ts, msg, level in reversed(self._alert_log):
-                color = lvl_colors.get(level, self.text_muted)
                 txt.insert("end", f"[{ts}] ", "ts")
                 txt.insert("end", f"{msg}\n", level)
                 txt.tag_config("ts", foreground=self.text_muted)
-                txt.tag_config(level, foreground=color)
+                txt.tag_config(level, foreground=lvl_colors.get(level, self.text_muted))
         txt.config(state="disabled")
-        btn_row = tk.Frame(body, bg=self.bg_card)
-        btn_row.pack(fill="x", pady=(6, 0))
-        ttk.Button(btn_row, text="Effacer les alertes",
-                   command=lambda: (self._clear_alerts(), win.destroy())).pack(side="left")
-        ttk.Button(btn_row, text="Fermer", command=win.destroy).pack(side="right")
 
     def _clear_alerts(self):
         self._alert_count = 0
@@ -1401,32 +1410,27 @@ DÉMARRAGE RAPIDE:
         self._alert_badge.config(text="")
         if hasattr(self, "_stat_alerts"):
             self._stat_alerts.config(text="0")
+        if self._detail_panel_active == "alerts":
+            self._toggle_detail("alerts")
+            self._toggle_detail("alerts")
 
-    def _popup_port(self):
+    def _render_detail_port(self, body):
         running = self.server_socket is not None
-        win, body = self._popup_base("Configuration du port", width=360, height=210)
-        tk.Label(body, text=f"Port actuel : {self.server_port.get()}",
-                 fg=self.text_color, bg=self.bg_card,
-                 font=("Segoe UI", 10)).pack(anchor="w", pady=(0, 8))
-        sep = tk.Frame(body, bg=self.border_color, height=1)
-        sep.pack(fill="x", pady=(0, 10))
+        self._detail_row(body, "Port actuel", self.server_port.get())
+        tk.Frame(body, bg=self.border_color, height=1).pack(fill="x", pady=(4, 8))
         if running:
-            tk.Label(body,
-                     text="Arrête le serveur avant de changer le port.",
-                     fg=self.warning_color, bg=self.bg_card,
-                     font=("Segoe UI", 9)).pack(anchor="w")
-            ttk.Button(body, text="Fermer", command=win.destroy).pack(pady=10, anchor="w")
+            tk.Label(body, text="Arrête le serveur pour modifier le port.",
+                     fg=self.warning_color, bg=self.bg_card, font=("Segoe UI", 9)).pack(anchor="w")
             return
-        new_row = tk.Frame(body, bg=self.bg_card)
-        new_row.pack(fill="x", pady=4)
-        tk.Label(new_row, text="Nouveau port", fg=self.text_muted, bg=self.bg_card,
+        row = tk.Frame(body, bg=self.bg_card)
+        row.pack(fill="x", pady=4)
+        tk.Label(row, text="Nouveau port", fg=self.text_muted, bg=self.bg_card,
                  font=("Segoe UI", 9), width=14, anchor="w").pack(side="left")
         var = tk.StringVar(value=str(self.server_port.get()))
-        entry = tk.Entry(new_row, textvariable=var, bg=self.bg_input, fg=self.text_color,
+        entry = tk.Entry(row, textvariable=var, bg=self.bg_input, fg=self.text_color,
                          insertbackground=self.text_color, relief="flat",
                          font=("Consolas", 10), width=8)
         entry.pack(side="left", padx=(0, 6))
-        entry.focus_set()
         msg_lbl = tk.Label(body, text="", fg=self.error_color, bg=self.bg_card,
                            font=("Segoe UI", 8))
         msg_lbl.pack(anchor="w")
@@ -1443,13 +1447,15 @@ DÉMARRAGE RAPIDE:
             if hasattr(self, "_stat_port"):
                 self._stat_port.config(text=str(p))
             self.log_message(f"Port changé → {p}", "info")
-            win.destroy()
+            self._toggle_detail("port")
 
         btn_row = tk.Frame(body, bg=self.bg_card)
-        btn_row.pack(fill="x", pady=(10, 0))
+        btn_row.pack(fill="x", pady=(6, 0))
         ttk.Button(btn_row, text="Appliquer", command=save).pack(side="left", padx=(0, 6))
-        ttk.Button(btn_row, text="Annuler", command=win.destroy).pack(side="left")
-        win.bind("<Return>", lambda e: save())
+        ttk.Button(btn_row, text="Annuler",
+                   command=lambda: self._toggle_detail("port")).pack(side="left")
+        entry.bind("<Return>", lambda e: save())
+        entry.focus_set()
 
     def send_command(self, event=None):
         cmd = self.cmd_entry.get().strip()
