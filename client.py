@@ -371,7 +371,7 @@ def main():
             client.settimeout(10)
             client.connect((SERVER_HOST, SERVER_PORT))
             client.settimeout(None)
-            # Ne pas reset _reconnect_delay ici: on attend le succes de l'auth
+            # Don't reset backoff here: wait for auth success
             logger.info("Connected!")
 
             # Derive encryption key
@@ -387,7 +387,7 @@ def main():
                 # boucle qui s'occupe du sleep + doublement (voir _compute_backoff_delays)
                 continue
 
-            # Auth reussie: reset du backoff exponentiel
+            # Auth succeeded: reset exponential backoff
             _reconnect_delay = 1
             logger.info("Authenticated, backoff reset")
 
@@ -579,7 +579,7 @@ def main():
 
         stream_stop_event.set()
         time.sleep(_reconnect_delay)
-        # Backoff: voir _compute_backoff_delays pour la logique de reference
+        # Backoff: see _compute_backoff_delays for the reference formula
         _reconnect_delay = min(_reconnect_delay * 2, 60)
 
 
