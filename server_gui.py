@@ -1228,11 +1228,17 @@ DÉMARRAGE RAPIDE:
                         if self.report: self.report.add_screenshot(f"screenshot_{len(self.screenshots)}.png")
                 else:
                     cip = self.clients.get(self.current_client_id, {}).get("address", ("?",))[0]
-                    self.root.after(0, lambda: self.log_message(
+                    raw_cause = (status or "FAIL").replace("FAIL:", "").strip() if status else ""
+                    if raw_cause:
+                        cause = raw_cause
+                        suggestion = "Voir l'erreur ci-dessus — si pyautogui est absent: pip install pyautogui pillow"
+                    else:
+                        cause = "pyautogui absent ou erreur inconnue"
+                        suggestion = "pip install pyautogui pillow sur le client cible"
+                    self.root.after(0, lambda c=cause, s=suggestion: self.log_message(
                         "Screenshot échoué", "error",
                         client_ip=cip, operation="capture_ecran",
-                        cause="Réponse FAIL du client (pyautogui peut-être absent)",
-                        suggestion="pip install pyautogui sur le client cible"
+                        cause=c, suggestion=s
                     ))
 
             elif cmd == "webcam":

