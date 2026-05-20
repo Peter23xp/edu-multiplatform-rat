@@ -53,18 +53,23 @@ def _watchdog(stop_event, interval=10, timeout=35):
     while not stop_event.is_set():
         now = time.time()
         dead = []
+        notices = []
         with clients_lock:
             for cid, info in list(clients.items()):
-                last = info.get("last_seen", now)
+                # last_seen is always set at registration; no fallback needed
+                last = info["last_seen"]
                 if now - last > timeout:
-                    dead.append(cid)
-            for cid in dead:
-                info = clients.pop(cid)
+                    dead.append((cid, info))
+            for cid, info in dead:
+                clients.pop(cid)
                 try:
                     info["socket"].close()
                 except Exception:
                     pass
-                print(f"\n[!] Client {info['address'][0]} timeout — removed (inactive {timeout}s)")
+                notices.append(f"\n[!] Client {info['address'][0]} timeout — removed (inactive {timeout}s)")
+        # Print outside the lock to avoid lock-order inversion
+        for msg in notices:
+            print(msg)
         stop_event.wait(interval)
 
 

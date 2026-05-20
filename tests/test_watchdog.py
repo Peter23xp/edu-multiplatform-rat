@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 def test_watchdog_removes_dead_client():
     import server as s
+    original_clients = s.clients.copy()
     # Injecter un faux client avec last_seen trop ancien
     fake_sock = MagicMock()
     s.clients = {
@@ -18,3 +19,5 @@ def test_watchdog_removes_dead_client():
     t.join(timeout=1)
     assert "dead-1" not in s.clients
     fake_sock.close.assert_called()
+    # Restore module state
+    s.clients = original_clients
