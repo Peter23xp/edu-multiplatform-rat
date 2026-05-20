@@ -3,6 +3,7 @@ import os
 import json
 import time
 import glob
+import secrets
 
 class Spool:
     def __init__(self, directory=None):
@@ -14,7 +15,8 @@ class Spool:
     def push(self, kind, payload):
         """Writes an entry to disk. Returns the filename (item id)."""
         ts = int(time.time() * 1000)
-        filename = f"{kind}_{ts}.json"
+        uid = secrets.token_hex(4)
+        filename = f"{kind}_{ts}_{uid}.json"
         path = os.path.join(self.dir, filename)
         with open(path, "w", encoding="utf-8") as f:
             json.dump({"kind": kind, "ts": ts, "payload": payload}, f)
