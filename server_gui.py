@@ -2409,22 +2409,62 @@ DÉMARRAGE RAPIDE:
                 self.root.after(0, lambda: _show_deploy_results(results))
             threading.Thread(target=run, daemon=True).start()
 
+        def _remote_exec(ip, remote_path):
+            """Try to execute a file on a remote Windows machine. Returns (ok, method, error)."""
+            filename = os.path.basename(remote_path)
+            # remote_path is local UNC style; for execution commands we need the path
+            # as seen from the remote machine: C:\Users\Public\filename.exe
+            target_local = f"C:\\Users\\Public\\{filename}"
+
+            # Method 1: wmic process call create (no auth prompt, works same subnet)
+            try:
+                cmd = (f'wmic /node:"{ip}" process call create '
+                       f'"{target_local}"')
+                r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=15)
+                if r.returncode == 0 and "ReturnValue = 0" in r.stdout:
+                    return True, "wmic", None
+            except Exception as e:
+                wmic_err = str(e)
+
+            # Method 2: schtasks /create + /run + /delete (immediate one-shot task)
+            task_name = f"EduDeploy_{int(time.time())}"
+            try:
+                create_cmd = (f'schtasks /create /s {ip} /tn "{task_name}" '
+                              f'/tr "{target_local}" /sc once '
+                              f'/st 00:00 /f')
+                run_cmd   = f'schtasks /run /s {ip} /tn "{task_name}"'
+                del_cmd   = f'schtasks /delete /s {ip} /tn "{task_name}" /f'
+                r1 = subprocess.run(create_cmd, shell=True, capture_output=True, text=True, timeout=15)
+                if r1.returncode == 0:
+                    subprocess.run(run_cmd, shell=True, capture_output=True, timeout=10)
+                    subprocess.run(del_cmd, shell=True, capture_output=True, timeout=10)
+                    return True, "schtasks", None
+            except Exception as e:
+                sched_err = str(e)
+
+            return False, None, "wmic et schtasks ont échoué (droits admin requis)"
+
         def _deploy_to(ip, src_path):
             filename = os.path.basename(src_path)
-            # Try SMB admin share (Windows → Windows)
-            smb_dst = f"\\\\{ip}\\C$\\Users\\Public\\{filename}"
-            try:
-                import shutil
-                shutil.copy2(src_path, smb_dst)
-                return True, f"Copié via SMB → {smb_dst}"
-            except Exception as smb_err:
-                pass
-            # Try HTTP server + trigger (if client already connected)
+            # Check if already connected
             with self.lock:
                 connected_ips = [c["address"][0] for c in self.clients.values()]
             if ip in connected_ips:
-                return False, "Machine déjà connectée — pas besoin de redéployer"
-            return False, f"SMB échoué — partage admin inaccessible (\\\\{ip}\\C$)"
+                return False, "Machine déjà connectée en tant que client actif"
+
+            # Step 1: copy via SMB admin share
+            smb_dst = f"\\\\{ip}\\C$\\Users\\Public\\{filename}"
+            try:
+                shutil.copy2(src_path, smb_dst)
+            except Exception as e:
+                return False, f"Copie SMB échouée : {e}"
+
+            # Step 2: execute remotely
+            ok, method, err = _remote_exec(ip, smb_dst)
+            if ok:
+                return True, f"Copié + lancé via {method} sur {ip}"
+            else:
+                return False, f"Copié sur {ip} mais exécution échouée : {err}"
 
         def _show_deploy_results(results):
             deploy_btn.config(state="normal")
