@@ -990,6 +990,14 @@ QUICK START:
         else:
             threading.Thread(target=self._handle_generic, args=(cmd,), daemon=True).start()
 
+    def _write_terminal(self, text):
+        if not hasattr(self, "terminal_out"):
+            return
+        self.terminal_out.config(state="normal")
+        self.terminal_out.insert("end", text + "\n")
+        self.terminal_out.see("end")
+        self.terminal_out.config(state="disabled")
+
     def _handle_generic(self, cmd):
         if cmd.startswith("download "):
             self._do_download(cmd)
@@ -998,7 +1006,8 @@ QUICK START:
         else:
             resp = self._send_recv(cmd)
             if resp:
-                self.root.after(0, lambda: self.log_message(resp, "info"))
+                self.root.after(0, lambda r=resp, c=cmd: self._write_terminal(f"$ {c}\n{r}\n"))
+                self.root.after(0, lambda r=resp: self.log_message(r, "info"))
                 if self.report and cmd not in ("sysinfo", "capabilities", "persist_check", "persist_methods"):
                     self.report.add_command_result(cmd, resp)
 
