@@ -63,9 +63,11 @@ except ImportError:
 
 try:
     import pyautogui
+    from PIL import Image as _PIL_Image
     SCREENSHOT_AVAILABLE = True
 except ImportError:
     SCREENSHOT_AVAILABLE = False
+    _PIL_Image = None
 
 WEBCAM_AVAILABLE = False
 try:
@@ -355,19 +357,23 @@ def stream_screen(sock, key, stop_event, send_lock):
         return
     with send_lock:
         send_msg(sock, "PASS", key)
+    _STREAM_MAX_W = 1920
+    _STREAM_MAX_H = 1080
     try:
         while not stop_event.is_set():
             screenshot = pyautogui.screenshot()
-            screenshot = screenshot.resize((screenshot.width // 2, screenshot.height // 2))
+            w, h = screenshot.size
+            if w > _STREAM_MAX_W or h > _STREAM_MAX_H:
+                scale = min(_STREAM_MAX_W / w, _STREAM_MAX_H / h)
+                screenshot = screenshot.resize((int(w * scale), int(h * scale)), _PIL_Image.LANCZOS)
             img_bytes = io.BytesIO()
-            screenshot.save(img_bytes, format="JPEG", quality=40)
+            screenshot.save(img_bytes, format="JPEG", quality=80)
             frame_data = img_bytes.getvalue()
             with send_lock:
                 send_msg(sock, frame_data, key)
             ack = recv_msg_str(sock, key)
             if ack != "NEXT":
                 break
-            time.sleep(0.3)
     except Exception as e:
         logger.error(f"Stream error: {e}")
     finally:
