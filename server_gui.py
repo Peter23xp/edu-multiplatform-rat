@@ -3,7 +3,7 @@
 # For learning purposes only - use in controlled test environments
 
 import tkinter as tk
-from tkinter import ttk, scrolledtext, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox
 import socket
 import os
 import sys
@@ -442,59 +442,69 @@ class RATServerGUI:
     # ═══════════════════════════════════════════════════════════════════
 
     def _setup_stream(self, parent):
-        ctrl = ttk.Frame(parent)
-        ctrl.pack(fill="x", padx=10, pady=10)
-        self.stream_start_btn = ttk.Button(ctrl, text="Start Stream", command=self.start_stream)
-        self.stream_start_btn.pack(side=tk.LEFT, padx=5)
-        self.stream_stop_btn = ttk.Button(ctrl, text="Stop Stream", command=self.stop_stream, state="disabled")
-        self.stream_stop_btn.pack(side=tk.LEFT, padx=5)
-        self.stream_fps_label = ttk.Label(ctrl, text="FPS: --", style="Status.TLabel")
-        self.stream_fps_label.pack(side=tk.RIGHT, padx=10)
-
-        self.stream_canvas = tk.Canvas(parent, bg="#1a1a2e", highlightthickness=0)
-        self.stream_canvas.pack(fill="both", expand=True, padx=10, pady=10)
+        parent.configure(bg=self.bg_main)
+        self._section_header(parent, "Écran / Stream", "Capture et streaming en direct")
+        ctrl = tk.Frame(parent, bg=self.bg_main)
+        ctrl.pack(fill="x", pady=(0, 8))
+        self.stream_start_btn = ttk.Button(ctrl, text="▶ Démarrer stream", command=self.start_stream)
+        self.stream_start_btn.pack(side="left", padx=5)
+        self.stream_stop_btn = ttk.Button(ctrl, text="■ Arrêter", command=self.stop_stream,
+                                           state="disabled", style="Danger.TButton")
+        self.stream_stop_btn.pack(side="left", padx=5)
+        self.stream_fps_label = tk.Label(ctrl, text="FPS: --", fg=self.success_color,
+                                          bg=self.bg_main, font=("Segoe UI", 10))
+        self.stream_fps_label.pack(side="right", padx=10)
+        self.stream_canvas = tk.Canvas(parent, bg=self.bg_console, highlightthickness=0)
+        self.stream_canvas.pack(fill="both", expand=True)
 
     # ═══════════════════════════════════════════════════════════════════
     # FILE OPERATIONS
     # ═══════════════════════════════════════════════════════════════════
 
     def _setup_files(self, parent):
-        panel = ttk.Frame(parent)
-        panel.pack(fill="both", expand=True, padx=5, pady=5)
+        parent.configure(bg=self.bg_main)
+        self._section_header(parent, "Transfert de fichiers", "Upload / Download vers le client")
+        panel = tk.Frame(parent, bg=self.bg_main)
+        panel.pack(fill="both", expand=True)
 
-        left = ttk.Frame(panel)
-        left.pack(side=tk.LEFT, fill="both", expand=True, padx=5)
-        ttk.Label(left, text="Local Files", style="Header.TLabel").pack(anchor="w")
-        pf = ttk.Frame(left)
-        pf.pack(fill="x", pady=3)
+        left = tk.Frame(panel, bg=self.bg_card, highlightbackground=self.border_color, highlightthickness=1)
+        left.pack(side="left", fill="both", expand=True, padx=(0, 4))
+        tk.Label(left, text="FICHIERS LOCAUX", fg=self.text_muted, bg=self.bg_card,
+                 font=("Segoe UI", 7), anchor="w", padx=8).pack(fill="x", pady=(6, 2))
+        pf = tk.Frame(left, bg=self.bg_card)
+        pf.pack(fill="x", padx=8, pady=3)
         self.local_path_var = tk.StringVar(value=os.getcwd())
-        ttk.Entry(pf, textvariable=self.local_path_var, width=30).pack(side=tk.LEFT, fill="x", expand=True)
-        ttk.Button(pf, text="Browse", command=self.browse_local_dir).pack(side=tk.RIGHT)
-        lf = ttk.Frame(left)
-        lf.pack(fill="both", expand=True, pady=3)
-        self.local_files = tk.Listbox(lf, bg="#3B4252", fg=self.text_color, font=("Segoe UI", 9))
-        self.local_files.pack(side=tk.LEFT, fill="both", expand=True)
-        ttk.Button(left, text="Refresh", command=self.refresh_local_files).pack(anchor="w", pady=3)
+        ttk.Entry(pf, textvariable=self.local_path_var, width=30).pack(side="left", fill="x", expand=True)
+        ttk.Button(pf, text="Parcourir", command=self.browse_local_dir).pack(side="right", padx=(4, 0))
+        lf = tk.Frame(left, bg=self.bg_card)
+        lf.pack(fill="both", expand=True, padx=8, pady=3)
+        self.local_files = tk.Listbox(lf, bg=self.bg_input, fg=self.text_color, font=("Consolas", 9),
+                                       borderwidth=0, highlightthickness=0, selectbackground=self.accent_color)
+        self.local_files.pack(side="left", fill="both", expand=True)
+        ttk.Button(left, text="Actualiser", command=self.refresh_local_files).pack(anchor="w", padx=8, pady=4)
 
-        mid = ttk.Frame(panel, width=80)
-        mid.pack(side=tk.LEFT, fill="y", padx=5)
-        ttk.Label(mid, text="Transfer", style="Bold.TLabel").pack(pady=10)
+        mid = tk.Frame(panel, bg=self.bg_main, width=90)
+        mid.pack(side="left", fill="y", padx=4)
+        tk.Label(mid, text="Transfert", fg=self.accent_color, bg=self.bg_main,
+                 font=("Segoe UI", 9, "bold")).pack(pady=10)
         ttk.Button(mid, text="Upload >>", command=self.upload_file).pack(pady=5)
         ttk.Button(mid, text="<< Download", command=self.download_file).pack(pady=5)
 
-        right = ttk.Frame(panel)
-        right.pack(side=tk.RIGHT, fill="both", expand=True, padx=5)
-        ttk.Label(right, text="Remote Files", style="Header.TLabel").pack(anchor="w")
-        rpf = ttk.Frame(right)
-        rpf.pack(fill="x", pady=3)
+        right = tk.Frame(panel, bg=self.bg_card, highlightbackground=self.border_color, highlightthickness=1)
+        right.pack(side="right", fill="both", expand=True, padx=(4, 0))
+        tk.Label(right, text="FICHIERS DISTANTS", fg=self.text_muted, bg=self.bg_card,
+                 font=("Segoe UI", 7), anchor="w", padx=8).pack(fill="x", pady=(6, 2))
+        rpf = tk.Frame(right, bg=self.bg_card)
+        rpf.pack(fill="x", padx=8, pady=3)
         self.remote_path_var = tk.StringVar(value=".")
-        ttk.Entry(rpf, textvariable=self.remote_path_var, width=30).pack(side=tk.LEFT, fill="x", expand=True)
-        ttk.Button(rpf, text="List", command=self.list_remote_files).pack(side=tk.RIGHT)
-        rf = ttk.Frame(right)
-        rf.pack(fill="both", expand=True, pady=3)
-        self.remote_files = tk.Listbox(rf, bg="#3B4252", fg=self.text_color, font=("Segoe UI", 9))
-        self.remote_files.pack(side=tk.LEFT, fill="both", expand=True)
-        ttk.Button(right, text="Refresh", command=self.list_remote_files).pack(anchor="w", pady=3)
+        ttk.Entry(rpf, textvariable=self.remote_path_var, width=30).pack(side="left", fill="x", expand=True)
+        ttk.Button(rpf, text="Lister", command=self.list_remote_files).pack(side="right", padx=(4, 0))
+        rf = tk.Frame(right, bg=self.bg_card)
+        rf.pack(fill="both", expand=True, padx=8, pady=3)
+        self.remote_files = tk.Listbox(rf, bg=self.bg_input, fg=self.text_color, font=("Consolas", 9),
+                                        borderwidth=0, highlightthickness=0, selectbackground=self.accent_color)
+        self.remote_files.pack(side="left", fill="both", expand=True)
+        ttk.Button(right, text="Actualiser", command=self.list_remote_files).pack(anchor="w", padx=8, pady=4)
 
         self.refresh_local_files()
 
@@ -503,188 +513,198 @@ class RATServerGUI:
     # ═══════════════════════════════════════════════════════════════════
 
     def _setup_screenshots(self, parent):
-        ctrl = ttk.Frame(parent)
-        ctrl.pack(fill="x", padx=10, pady=5)
-        ttk.Button(ctrl, text="Capture", command=self.capture_screenshot).pack(side=tk.LEFT, padx=5)
-        ttk.Button(ctrl, text="Save", command=self.save_screenshot).pack(side=tk.LEFT, padx=5)
-        self.ss_canvas = tk.Canvas(parent, bg="#2E3440", highlightthickness=0)
-        self.ss_canvas.pack(fill="both", expand=True, padx=10, pady=5)
-        nav = ttk.Frame(parent)
-        nav.pack(fill="x", padx=10, pady=5)
-        ttk.Button(nav, text="< Prev", command=self.prev_screenshot).pack(side=tk.LEFT)
-        self.ss_label = ttk.Label(nav, text="No screenshots")
-        self.ss_label.pack(side=tk.LEFT, padx=20)
-        ttk.Button(nav, text="Next >", command=self.next_screenshot).pack(side=tk.LEFT)
+        parent.configure(bg=self.bg_main)
+        self._section_header(parent, "Screenshots", "Captures d'écran du client")
+        ctrl = tk.Frame(parent, bg=self.bg_main)
+        ctrl.pack(fill="x", pady=(0, 8))
+        ttk.Button(ctrl, text="Capturer", command=self.capture_screenshot).pack(side="left", padx=5)
+        ttk.Button(ctrl, text="Sauvegarder", command=self.save_screenshot).pack(side="left", padx=5)
+        self.ss_canvas = tk.Canvas(parent, bg=self.bg_console, highlightthickness=0)
+        self.ss_canvas.pack(fill="both", expand=True)
+        nav = tk.Frame(parent, bg=self.bg_main)
+        nav.pack(fill="x", pady=(8, 0))
+        ttk.Button(nav, text="< Préc", command=self.prev_screenshot).pack(side="left")
+        self.ss_label = tk.Label(nav, text="Aucun screenshot", fg=self.text_muted,
+                                  bg=self.bg_main, font=("Segoe UI", 9))
+        self.ss_label.pack(side="left", padx=20)
+        ttk.Button(nav, text="Suiv >", command=self.next_screenshot).pack(side="left")
 
     # ═══════════════════════════════════════════════════════════════════
     # SYSINFO
     # ═══════════════════════════════════════════════════════════════════
 
     def _setup_sysinfo(self, parent):
-        ctrl = ttk.Frame(parent)
-        ctrl.pack(fill="x", padx=10, pady=5)
-        ttk.Button(ctrl, text="Refresh Info", command=self.get_system_info).pack(side=tk.LEFT, padx=5)
-        ttk.Button(ctrl, text="Get Capabilities", command=self.get_capabilities).pack(side=tk.LEFT, padx=5)
-        self.sysinfo_text = scrolledtext.ScrolledText(parent, bg="#3B4252", fg=self.text_color, font=("Consolas", 10))
-        self.sysinfo_text.pack(fill="both", expand=True, padx=10, pady=5)
-        self.sysinfo_text.config(state="disabled")
+        parent.configure(bg=self.bg_main)
+        self._section_header(parent, "Info système", "Informations et capacités du client")
+        ctrl = tk.Frame(parent, bg=self.bg_main)
+        ctrl.pack(fill="x", pady=(0, 8))
+        ttk.Button(ctrl, text="Rafraîchir", command=self.get_system_info).pack(side="left", padx=5)
+        ttk.Button(ctrl, text="Capacités", command=self.get_capabilities).pack(side="left", padx=5)
+        self.sysinfo_text = self._make_text_area(parent)
 
     # ═══════════════════════════════════════════════════════════════════
     # WEBCAM
     # ═══════════════════════════════════════════════════════════════════
 
     def _setup_webcam(self, parent):
-        ctrl = ttk.Frame(parent)
-        ctrl.pack(fill="x", padx=10, pady=5)
-        ttk.Button(ctrl, text="Capture", command=self.capture_webcam).pack(side=tk.LEFT, padx=5)
-        ttk.Button(ctrl, text="Save", command=self.save_webcam).pack(side=tk.LEFT, padx=5)
-        self.wc_canvas = tk.Canvas(parent, bg="#2E3440", highlightthickness=0)
-        self.wc_canvas.pack(fill="both", expand=True, padx=10, pady=5)
-        nav = ttk.Frame(parent)
-        nav.pack(fill="x", padx=10, pady=5)
-        ttk.Button(nav, text="< Prev", command=lambda: self._nav_webcam(-1)).pack(side=tk.LEFT)
-        self.wc_label = ttk.Label(nav, text="No images")
-        self.wc_label.pack(side=tk.LEFT, padx=20)
-        ttk.Button(nav, text="Next >", command=lambda: self._nav_webcam(1)).pack(side=tk.LEFT)
+        parent.configure(bg=self.bg_main)
+        self._section_header(parent, "Webcam", "Capture webcam du client")
+        ctrl = tk.Frame(parent, bg=self.bg_main)
+        ctrl.pack(fill="x", pady=(0, 8))
+        ttk.Button(ctrl, text="Capturer", command=self.capture_webcam).pack(side="left", padx=5)
+        ttk.Button(ctrl, text="Sauvegarder", command=self.save_webcam).pack(side="left", padx=5)
+        self.wc_canvas = tk.Canvas(parent, bg=self.bg_console, highlightthickness=0)
+        self.wc_canvas.pack(fill="both", expand=True)
+        nav = tk.Frame(parent, bg=self.bg_main)
+        nav.pack(fill="x", pady=(8, 0))
+        ttk.Button(nav, text="< Préc", command=lambda: self._nav_webcam(-1)).pack(side="left")
+        self.wc_label = tk.Label(nav, text="Aucune image", fg=self.text_muted,
+                                  bg=self.bg_main, font=("Segoe UI", 9))
+        self.wc_label.pack(side="left", padx=20)
+        ttk.Button(nav, text="Suiv >", command=lambda: self._nav_webcam(1)).pack(side="left")
 
     # ═══════════════════════════════════════════════════════════════════
     # KEYLOGGER
     # ═══════════════════════════════════════════════════════════════════
 
     def _setup_keylogger(self, parent):
-        ctrl = ttk.Frame(parent)
-        ctrl.pack(fill="x", padx=10, pady=5)
-        ttk.Button(ctrl, text="Start", command=lambda: self._cmd_thread("keylogger_start")).pack(side=tk.LEFT, padx=3)
-        ttk.Button(ctrl, text="Stop", command=lambda: self._cmd_thread("keylogger_stop")).pack(side=tk.LEFT, padx=3)
-        ttk.Button(ctrl, text="Dump", command=self.dump_keylogger).pack(side=tk.LEFT, padx=3)
-        ttk.Button(ctrl, text="Save", command=self.save_keylogger).pack(side=tk.LEFT, padx=3)
-        self.keylog_text = scrolledtext.ScrolledText(parent, bg="#3B4252", fg=self.text_color, font=("Consolas", 10))
-        self.keylog_text.pack(fill="both", expand=True, padx=10, pady=5)
+        parent.configure(bg=self.bg_main)
+        self._section_header(parent, "Keylogger", "Enregistrement des frappes clavier")
+        ctrl = tk.Frame(parent, bg=self.bg_main)
+        ctrl.pack(fill="x", pady=(0, 8))
+        ttk.Button(ctrl, text="Démarrer", command=lambda: self._cmd_thread("keylogger_start")).pack(side="left", padx=3)
+        ttk.Button(ctrl, text="Arrêter", command=lambda: self._cmd_thread("keylogger_stop")).pack(side="left", padx=3)
+        ttk.Button(ctrl, text="Récupérer", command=self.dump_keylogger).pack(side="left", padx=3)
+        ttk.Button(ctrl, text="Sauvegarder", command=self.save_keylogger).pack(side="left", padx=3)
+        self.keylog_text = self._make_text_area(parent, readonly=False)
 
     # ═══════════════════════════════════════════════════════════════════
     # CLIPBOARD
     # ═══════════════════════════════════════════════════════════════════
 
     def _setup_clipboard(self, parent):
-        ctrl = ttk.Frame(parent)
-        ctrl.pack(fill="x", padx=10, pady=5)
-        ttk.Button(ctrl, text="Start Monitor", command=lambda: self._cmd_thread("clipboard_start")).pack(side=tk.LEFT, padx=3)
-        ttk.Button(ctrl, text="Stop Monitor", command=lambda: self._cmd_thread("clipboard_stop")).pack(side=tk.LEFT, padx=3)
-        ttk.Button(ctrl, text="Dump History", command=self.dump_clipboard).pack(side=tk.LEFT, padx=3)
-        ttk.Button(ctrl, text="Get Current", command=self.get_current_clipboard).pack(side=tk.LEFT, padx=3)
-        self.clipboard_text = scrolledtext.ScrolledText(parent, bg="#3B4252", fg=self.text_color, font=("Consolas", 10))
-        self.clipboard_text.pack(fill="both", expand=True, padx=10, pady=5)
+        parent.configure(bg=self.bg_main)
+        self._section_header(parent, "Presse-papier", "Surveillance du clipboard")
+        ctrl = tk.Frame(parent, bg=self.bg_main)
+        ctrl.pack(fill="x", pady=(0, 8))
+        ttk.Button(ctrl, text="Démarrer", command=lambda: self._cmd_thread("clipboard_start")).pack(side="left", padx=3)
+        ttk.Button(ctrl, text="Arrêter", command=lambda: self._cmd_thread("clipboard_stop")).pack(side="left", padx=3)
+        ttk.Button(ctrl, text="Historique", command=self.dump_clipboard).pack(side="left", padx=3)
+        ttk.Button(ctrl, text="Actuel", command=self.get_current_clipboard).pack(side="left", padx=3)
+        self.clipboard_text = self._make_text_area(parent, readonly=False)
 
     # ═══════════════════════════════════════════════════════════════════
     # NETWORK SCANNER
     # ═══════════════════════════════════════════════════════════════════
 
     def _setup_scanner(self, parent):
-        ctrl = ttk.Frame(parent)
-        ctrl.pack(fill="x", padx=10, pady=5)
-        ttk.Button(ctrl, text="Full Network Scan", command=self.do_network_scan).pack(side=tk.LEFT, padx=3)
-        ttk.Button(ctrl, text="ARP Table", command=self.do_arp_scan).pack(side=tk.LEFT, padx=3)
-        ttk.Label(ctrl, text="Target IP:").pack(side=tk.LEFT, padx=(15, 3))
+        parent.configure(bg=self.bg_main)
+        self._section_header(parent, "Scanner réseau", "Découverte réseau et scan de ports")
+        ctrl = tk.Frame(parent, bg=self.bg_main)
+        ctrl.pack(fill="x", pady=(0, 8))
+        ttk.Button(ctrl, text="Scan complet", command=self.do_network_scan).pack(side="left", padx=3)
+        ttk.Button(ctrl, text="Table ARP", command=self.do_arp_scan).pack(side="left", padx=3)
+        tk.Label(ctrl, text="IP cible:", fg=self.text_muted, bg=self.bg_main,
+                 font=("Segoe UI", 9)).pack(side="left", padx=(15, 3))
         self.scan_target = ttk.Entry(ctrl, width=15)
-        self.scan_target.pack(side=tk.LEFT, padx=3)
-        ttk.Button(ctrl, text="Port Scan", command=self.do_port_scan).pack(side=tk.LEFT, padx=3)
-
-        self.scanner_text = scrolledtext.ScrolledText(parent, bg="#3B4252", fg=self.text_color, font=("Consolas", 10))
-        self.scanner_text.pack(fill="both", expand=True, padx=10, pady=5)
+        self.scan_target.pack(side="left", padx=3)
+        ttk.Button(ctrl, text="Scan ports", command=self.do_port_scan).pack(side="left", padx=3)
+        self.scanner_text = self._make_text_area(parent, readonly=False)
 
     # ═══════════════════════════════════════════════════════════════════
     # PERSISTENCE
     # ═══════════════════════════════════════════════════════════════════
 
     def _setup_persistence(self, parent):
-        ctrl = ttk.Frame(parent)
-        ctrl.pack(fill="x", padx=10, pady=5)
-        ttk.Button(ctrl, text="Check Status", command=lambda: self._cmd_thread("persist_check")).pack(side=tk.LEFT, padx=3)
-        ttk.Button(ctrl, text="List Methods", command=lambda: self._cmd_thread("persist_methods")).pack(side=tk.LEFT, padx=3)
-        ttk.Button(ctrl, text="Install Default", command=lambda: self._cmd_thread("persist_install")).pack(side=tk.LEFT, padx=3)
-        ttk.Button(ctrl, text="Remove", command=lambda: self._cmd_thread("persist_remove")).pack(side=tk.LEFT, padx=3)
-
-        ttk.Label(parent, text="Method:", style="TLabel").pack(anchor="w", padx=10, pady=(10, 0))
-        self.persist_method = ttk.Entry(parent, width=30)
-        self.persist_method.pack(anchor="w", padx=10, pady=3)
-        ttk.Button(parent, text="Install Specific Method", command=self.install_specific_persist).pack(anchor="w", padx=10, pady=3)
-
-        self.persist_text = scrolledtext.ScrolledText(parent, bg="#3B4252", fg=self.text_color, font=("Consolas", 10))
-        self.persist_text.pack(fill="both", expand=True, padx=10, pady=5)
+        parent.configure(bg=self.bg_main)
+        self._section_header(parent, "Persistance", "Mécanismes de persistance sur le client")
+        ctrl = tk.Frame(parent, bg=self.bg_main)
+        ctrl.pack(fill="x", pady=(0, 8))
+        ttk.Button(ctrl, text="Vérifier", command=lambda: self._cmd_thread("persist_check")).pack(side="left", padx=3)
+        ttk.Button(ctrl, text="Méthodes", command=lambda: self._cmd_thread("persist_methods")).pack(side="left", padx=3)
+        ttk.Button(ctrl, text="Installer", command=lambda: self._cmd_thread("persist_install")).pack(side="left", padx=3)
+        ttk.Button(ctrl, text="Supprimer", command=lambda: self._cmd_thread("persist_remove"),
+                   style="Danger.TButton").pack(side="left", padx=3)
+        method_frame = tk.Frame(parent, bg=self.bg_main)
+        method_frame.pack(fill="x", pady=(0, 8))
+        tk.Label(method_frame, text="Méthode:", fg=self.text_muted, bg=self.bg_main,
+                 font=("Segoe UI", 9)).pack(side="left")
+        self.persist_method = ttk.Entry(method_frame, width=30)
+        self.persist_method.pack(side="left", padx=5)
+        ttk.Button(method_frame, text="Installer spécifique", command=self.install_specific_persist).pack(side="left", padx=3)
+        self.persist_text = self._make_text_area(parent, readonly=False)
 
     # ═══════════════════════════════════════════════════════════════════
     # DEFENSE PANEL
     # ═══════════════════════════════════════════════════════════════════
 
     def _setup_defense(self, parent):
-        ttk.Label(parent, text="Defense & Detection Guide", style="Header.TLabel").pack(anchor="w", padx=10, pady=10)
-        ttk.Label(parent, text="How to DETECT and DEFEND against each feature of this RAT:", style="Defense.TLabel").pack(anchor="w", padx=10)
+        parent.configure(bg=self.bg_main)
+        self._section_header(parent, "Défense & Détection", "Guide pour détecter et se défendre contre chaque fonctionnalité")
 
-        defense_info = """
-=== DETECTION & DEFENSE GUIDE ===
+        defense_info = """=== GUIDE DE DÉTECTION & DÉFENSE ===
 
-1. NETWORK CONNECTIONS (C2 Communication)
-   Detection: Monitor outbound connections on unusual ports (4444, etc.)
-   Tools: Wireshark, netstat, TCPView, Windows Firewall logs
-   Defense: Egress filtering, IDS/IPS rules, DNS monitoring
-   Command: netstat -ano | findstr :4444
+1. CONNEXIONS RÉSEAU (Communication C2)
+   Détection: Surveiller les connexions sortantes sur les ports inhabituels (4444, etc.)
+   Outils: Wireshark, netstat, TCPView, logs Windows Firewall
+   Défense: Filtrage en sortie, règles IDS/IPS, surveillance DNS
+   Commande: netstat -ano | findstr :4444
 
-2. SCREENSHOT CAPTURE
-   Detection: Monitor API calls to BitBlt/CopyFromScreen
-   Tools: Process Monitor (Sysinternals), API monitoring
-   Defense: Application whitelisting, screen capture notifications
+2. CAPTURE D'ÉCRAN
+   Détection: Surveiller les appels API BitBlt/CopyFromScreen
+   Outils: Process Monitor (Sysinternals), surveillance API
+   Défense: Whitelisting d'applications, notifications de capture
 
 3. KEYLOGGER
-   Detection: Monitor SetWindowsHookEx / keyboard hook APIs
-   Tools: Process Monitor, HookAnalyzer, anti-keylogger software
-   Defense: Virtual keyboards, keystroke encryption drivers
+   Détection: Surveiller SetWindowsHookEx / hooks clavier
+   Outils: Process Monitor, HookAnalyzer, anti-keylogger
+   Défense: Claviers virtuels, pilotes de chiffrement des frappes
 
-4. WEBCAM ACCESS
-   Detection: Monitor DirectShow/V4L2 API access, LED indicator
-   Tools: Process Explorer (check handles to camera device)
-   Defense: Camera privacy covers, device access policies
+4. ACCÈS WEBCAM
+   Détection: Surveiller l'accès DirectShow/V4L2, indicateur LED
+   Outils: Process Explorer (vérifier les handles vers la caméra)
+   Défense: Caches de caméra, politiques d'accès aux périphériques
 
-5. PERSISTENCE
-   Detection: Monitor registry Run keys, Startup folder, Task Scheduler
-   Tools: Autoruns (Sysinternals), HKLM/HKCU Run key monitoring
-   Defense: Registry auditing, GPO restrictions, EDR
+5. PERSISTANCE
+   Détection: Surveiller les clés Run du registre, dossier Startup, Planificateur de tâches
+   Outils: Autoruns (Sysinternals), surveillance HKLM/HKCU Run
+   Défense: Audit du registre, restrictions GPO, EDR
 
-6. FILE OPERATIONS
-   Detection: File integrity monitoring, unusual file access patterns
-   Tools: OSSEC, Tripwire, Windows Audit Policy
-   Defense: DLP solutions, file access auditing
+6. OPÉRATIONS FICHIERS
+   Détection: Surveillance d'intégrité des fichiers, modèles d'accès inhabituels
+   Outils: OSSEC, Tripwire, Politique d'audit Windows
+   Défense: Solutions DLP, audit d'accès aux fichiers
 
-7. CLIPBOARD MONITORING
-   Detection: Monitor OpenClipboard/GetClipboardData API calls
-   Tools: API Monitor, Process Monitor
-   Defense: Clipboard managers with history, clearing sensitive data
+7. SURVEILLANCE PRESSE-PAPIER
+   Détection: Surveiller OpenClipboard/GetClipboardData
+   Outils: API Monitor, Process Monitor
+   Défense: Gestionnaires de presse-papier avec historique
 
-8. NETWORK SCANNING (Pivot)
-   Detection: Unusual internal scanning patterns, ARP storms
-   Tools: Network IDS (Snort/Suricata), SIEM correlation
-   Defense: Network segmentation, microsegmentation, VLAN isolation
+8. SCAN RÉSEAU (Pivot)
+   Détection: Modèles de scan interne inhabituels, tempêtes ARP
+   Outils: IDS réseau (Snort/Suricata), corrélation SIEM
+   Défense: Segmentation réseau, microsegmentation, isolation VLAN
 
-=== INDICATORS OF COMPROMISE (IOCs) ===
+=== INDICATEURS DE COMPROMISSION (IOCs) ===
 
-- Unusual outbound connections to non-standard ports
-- New entries in HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run
-- Unknown scheduled tasks
-- Processes with high network/CPU usage
-- Files in Startup folder
-- Suspicious Python processes running in background
+- Connexions sortantes inhabituelles sur des ports non-standard
+- Nouvelles entrées dans HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run
+- Tâches planifiées inconnues
+- Processus avec utilisation réseau/CPU élevée
+- Fichiers dans le dossier Startup
+- Processus Python suspects en arrière-plan
 
-=== RECOMMENDED SECURITY TOOLS ===
+=== OUTILS DE SÉCURITÉ RECOMMANDÉS ===
 
 - Sysinternals Suite (Process Explorer, Autoruns, TCPView)
 - Wireshark / NetworkMiner
-- YARA rules for signature-based detection
-- Sysmon for advanced Windows logging
-- OSQuery for endpoint querying
+- Règles YARA pour la détection par signature
+- Sysmon pour la journalisation avancée Windows
+- OSQuery pour l'interrogation des endpoints
 - CrowdStrike / SentinelOne / Defender for Endpoint (EDR)
 """
-        text = scrolledtext.ScrolledText(parent, bg="#3B4252", fg="#81A1C1", font=("Consolas", 10))
-        text.pack(fill="both", expand=True, padx=10, pady=5)
-        text.insert(tk.END, defense_info)
+        text = self._make_text_area(parent, readonly=False)
+        text.insert("end", defense_info)
         text.config(state="disabled")
 
     # ═══════════════════════════════════════════════════════════════════
@@ -692,92 +712,103 @@ class RATServerGUI:
     # ═══════════════════════════════════════════════════════════════════
 
     def _setup_report(self, parent):
-        ctrl = ttk.Frame(parent)
-        ctrl.pack(fill="x", padx=10, pady=5)
-        ttk.Button(ctrl, text="Generate Report", command=self.generate_report).pack(side=tk.LEFT, padx=3)
-        ttk.Button(ctrl, text="Export PDF", command=self.export_report_pdf).pack(side=tk.LEFT, padx=3)
-        ttk.Button(ctrl, text="Export Text", command=self.export_report_text).pack(side=tk.LEFT, padx=3)
-
-        self.report_text = scrolledtext.ScrolledText(parent, bg="#3B4252", fg=self.text_color, font=("Consolas", 10))
-        self.report_text.pack(fill="both", expand=True, padx=10, pady=5)
-        self.report_text.config(state="disabled")
+        parent.configure(bg=self.bg_main)
+        self._section_header(parent, "Rapports", "Génération de rapports de pentest")
+        ctrl = tk.Frame(parent, bg=self.bg_main)
+        ctrl.pack(fill="x", pady=(0, 8))
+        ttk.Button(ctrl, text="Générer", command=self.generate_report).pack(side="left", padx=3)
+        ttk.Button(ctrl, text="Export PDF", command=self.export_report_pdf).pack(side="left", padx=3)
+        ttk.Button(ctrl, text="Export Texte", command=self.export_report_text).pack(side="left", padx=3)
+        self.report_text = self._make_text_area(parent)
 
     # ═══════════════════════════════════════════════════════════════════
     # SETTINGS
     # ═══════════════════════════════════════════════════════════════════
 
     def _setup_settings(self, parent):
-        form = ttk.Frame(parent)
-        form.pack(fill="both", expand=True, padx=20, pady=10)
+        parent.configure(bg=self.bg_main)
+        self._section_header(parent, "Paramètres", "Configuration du serveur et génération de clients")
+        form = tk.Frame(parent, bg=self.bg_main)
+        form.pack(fill="both", expand=True)
 
-        srv = ttk.LabelFrame(form, text="Server")
-        srv.pack(fill="x", pady=5)
-        f1 = ttk.Frame(srv); f1.pack(fill="x", padx=10, pady=3)
-        ttk.Label(f1, text="Host:", width=12).pack(side=tk.LEFT)
-        ttk.Entry(f1, textvariable=self.server_host, width=20).pack(side=tk.LEFT, padx=5)
-        ttk.Button(f1, text="IP Info", command=self.show_ip_info).pack(side=tk.RIGHT)
-        f2 = ttk.Frame(srv); f2.pack(fill="x", padx=10, pady=3)
-        ttk.Label(f2, text="Port:", width=12).pack(side=tk.LEFT)
-        ttk.Entry(f2, textvariable=self.server_port, width=8).pack(side=tk.LEFT, padx=5)
+        srv = tk.Frame(form, bg=self.bg_card, highlightbackground=self.border_color, highlightthickness=1)
+        srv.pack(fill="x", pady=(0, 8))
+        tk.Label(srv, text="SERVEUR", fg=self.text_muted, bg=self.bg_card,
+                 font=("Segoe UI", 7), anchor="w", padx=10).pack(fill="x", pady=(6, 2))
+        f1 = tk.Frame(srv, bg=self.bg_card); f1.pack(fill="x", padx=10, pady=3)
+        tk.Label(f1, text="Host:", fg=self.text_color, bg=self.bg_card,
+                 font=("Segoe UI", 9), width=12, anchor="w").pack(side="left")
+        ttk.Entry(f1, textvariable=self.server_host, width=20).pack(side="left", padx=5)
+        ttk.Button(f1, text="IP Info", command=self.show_ip_info).pack(side="right")
+        f2 = tk.Frame(srv, bg=self.bg_card); f2.pack(fill="x", padx=10, pady=3)
+        tk.Label(f2, text="Port:", fg=self.text_color, bg=self.bg_card,
+                 font=("Segoe UI", 9), width=12, anchor="w").pack(side="left")
+        ttk.Entry(f2, textvariable=self.server_port, width=8).pack(side="left", padx=5)
 
-        auth = ttk.LabelFrame(form, text="Authentication")
-        auth.pack(fill="x", pady=5)
-        f3 = ttk.Frame(auth); f3.pack(fill="x", padx=10, pady=3)
-        ttk.Label(f3, text="Username:", width=12).pack(side=tk.LEFT)
-        ttk.Entry(f3, textvariable=self.auth_username_var, width=20).pack(side=tk.LEFT, padx=5)
-        f4 = ttk.Frame(auth); f4.pack(fill="x", padx=10, pady=3)
-        ttk.Label(f4, text="Password:", width=12).pack(side=tk.LEFT)
-        ttk.Entry(f4, textvariable=self.auth_password_var, width=20, show="*").pack(side=tk.LEFT, padx=5)
+        auth = tk.Frame(form, bg=self.bg_card, highlightbackground=self.border_color, highlightthickness=1)
+        auth.pack(fill="x", pady=(0, 8))
+        tk.Label(auth, text="AUTHENTIFICATION", fg=self.text_muted, bg=self.bg_card,
+                 font=("Segoe UI", 7), anchor="w", padx=10).pack(fill="x", pady=(6, 2))
+        f3 = tk.Frame(auth, bg=self.bg_card); f3.pack(fill="x", padx=10, pady=3)
+        tk.Label(f3, text="Username:", fg=self.text_color, bg=self.bg_card,
+                 font=("Segoe UI", 9), width=12, anchor="w").pack(side="left")
+        ttk.Entry(f3, textvariable=self.auth_username_var, width=20).pack(side="left", padx=5)
+        f4 = tk.Frame(auth, bg=self.bg_card); f4.pack(fill="x", padx=10, pady=3)
+        tk.Label(f4, text="Password:", fg=self.text_color, bg=self.bg_card,
+                 font=("Segoe UI", 9), width=12, anchor="w").pack(side="left")
+        ttk.Entry(f4, textvariable=self.auth_password_var, width=20, show="*").pack(side="left", padx=5)
 
-        gen = ttk.LabelFrame(form, text="Client Generation")
-        gen.pack(fill="x", pady=5)
-        ttk.Checkbutton(gen, text="Auto-generate on start", variable=self.auto_generate_var).pack(anchor="w", padx=10)
-        ttk.Checkbutton(gen, text="Use LAN IP", variable=self.lan_mode_var).pack(anchor="w", padx=10)
+        gen = tk.Frame(form, bg=self.bg_card, highlightbackground=self.border_color, highlightthickness=1)
+        gen.pack(fill="x", pady=(0, 8))
+        tk.Label(gen, text="GÉNÉRATION CLIENT", fg=self.text_muted, bg=self.bg_card,
+                 font=("Segoe UI", 7), anchor="w", padx=10).pack(fill="x", pady=(6, 2))
+        ttk.Checkbutton(gen, text="Auto-générer au démarrage", variable=self.auto_generate_var).pack(anchor="w", padx=10)
+        ttk.Checkbutton(gen, text="Utiliser IP LAN", variable=self.lan_mode_var).pack(anchor="w", padx=10)
         ttk.Checkbutton(gen, text="Build .exe (PyInstaller)", variable=self.build_exe_var).pack(anchor="w", padx=10)
-        ttk.Checkbutton(gen, text="Save to builds/clients/", variable=self.save_to_builds_var).pack(anchor="w", padx=10)
-        bf = ttk.Frame(gen)
+        ttk.Checkbutton(gen, text="Sauver dans builds/clients/", variable=self.save_to_builds_var).pack(anchor="w", padx=10)
+        bf = tk.Frame(gen, bg=self.bg_card)
         bf.pack(anchor="w", padx=10, pady=5)
-        ttk.Button(bf, text="Generate Client Now", command=self.manual_generate_client).pack(side=tk.LEFT, padx=(0, 8))
-        ttk.Button(bf, text="Build Executable Now", command=self.build_client_executable).pack(side=tk.LEFT)
+        ttk.Button(bf, text="Générer client", command=self.manual_generate_client).pack(side="left", padx=(0, 8))
+        ttk.Button(bf, text="Build exécutable", command=self.build_client_executable).pack(side="left")
 
     # ═══════════════════════════════════════════════════════════════════
     # HELP
     # ═══════════════════════════════════════════════════════════════════
 
     def _setup_help(self, parent):
-        help_content = """
-=== EDUCATIONAL RAT SERVER - FULL FEATURED ===
+        parent.configure(bg=self.bg_main)
+        self._section_header(parent, "Aide", "Documentation et commandes disponibles")
+        help_content = """=== EDUCATIONAL RAT SERVER - FULL FEATURED ===
 
-FEATURES:
-- AES-256 encrypted communication
-- Live screen streaming
-- Screenshot & Webcam capture
-- Keylogger & Clipboard monitor
-- File upload/download
-- Network scanner (pivot simulation)
-- Multi-platform persistence
-- Professional pentest report generation
-- Defense & detection guide
+FONCTIONNALITÉS:
+- Communication chiffrée AES-256
+- Streaming écran en direct
+- Capture screenshot & Webcam
+- Keylogger & Moniteur presse-papier
+- Upload/Download de fichiers
+- Scanner réseau (simulation pivot)
+- Persistance multi-plateforme
+- Génération de rapports de pentest
+- Guide de défense & détection
 
-COMMANDS:
+COMMANDES:
   sysinfo, screenshot, webcam, stream_start, stream_stop
   keylogger_start/stop/dump, clipboard_start/stop/dump/current
   upload <file>, download <file>, listdir [path], delete <file>
   persist_install [method], persist_remove, persist_check
   scan_network, scan_ports <ip>, scan_arp
   capabilities, exit
-  (any other) = shell command
+  (tout autre) = commande shell
 
-QUICK START:
-1. Settings tab -> Configure IP/Port
-2. Start Server
-3. Run client_gen.py on target
-4. Select client -> Send commands
+DÉMARRAGE RAPIDE:
+1. Paramètres -> Configurer IP/Port
+2. Démarrer le serveur
+3. Lancer client_gen.py sur la cible
+4. Sélectionner un client -> Envoyer des commandes
 """
-        w = scrolledtext.ScrolledText(parent, bg="#3B4252", fg=self.text_color, font=("Segoe UI", 10))
-        w.pack(fill="both", expand=True, padx=10, pady=5)
-        w.insert(tk.END, help_content)
-        w.config(state="disabled")
+        text = self._make_text_area(parent, readonly=False)
+        text.insert("end", help_content)
+        text.config(state="disabled")
 
     # ═══════════════════════════════════════════════════════════════════
     # CORE SERVER LOGIC
@@ -1557,6 +1588,31 @@ QUICK START:
             self.log_message(f"Report saved: {path}", "success")
 
     # ─── Utilities ───────────────────────────────────────
+
+    def _section_header(self, parent, title, subtitle=None):
+        hdr = tk.Frame(parent, bg=self.bg_main)
+        hdr.pack(fill="x", pady=(0, 10))
+        tk.Label(hdr, text=title, fg=self.accent_color, bg=self.bg_main,
+                 font=("Segoe UI", 13, "bold")).pack(side="left")
+        if subtitle:
+            tk.Label(hdr, text=subtitle, fg=self.text_muted, bg=self.bg_main,
+                     font=("Segoe UI", 9)).pack(side="left", padx=10)
+        return hdr
+
+    def _make_text_area(self, parent, readonly=True):
+        frame = tk.Frame(parent, bg=self.bg_card,
+                          highlightbackground=self.border_color, highlightthickness=1)
+        frame.pack(fill="both", expand=True)
+        text = tk.Text(frame, bg=self.bg_console, fg=self.text_color,
+                       font=("Consolas", 9), borderwidth=0, highlightthickness=0,
+                       wrap="word")
+        if readonly:
+            text.config(state="disabled")
+        sb = tk.Scrollbar(frame, orient="vertical", command=text.yview)
+        sb.pack(side="right", fill="y")
+        text.config(yscrollcommand=sb.set)
+        text.pack(fill="both", expand=True, padx=6, pady=6)
+        return text
 
     def _update_indicator(self, status):
         colors  = {"idle": self.error_color, "listening": self.warning_color, "connected": self.success_color}
