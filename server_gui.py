@@ -330,14 +330,14 @@ class RATServerGUI:
 
     def _setup_dashboard(self, parent):
         parent.configure(bg=self.bg_main)
-        stats_row = tk.Frame(parent, bg=self.bg_main)
-        stats_row.pack(fill="x", pady=(0, 0))
-        self._stat_clients = self._make_stat_card(stats_row, "0",    "CLIENTS", self.success_color, lambda: self._toggle_detail("clients"))
-        self._stat_server  = self._make_stat_card(stats_row, "OFF",  "SERVEUR", self.error_color,   lambda: self._toggle_detail("server"))
-        self._stat_alerts  = self._make_stat_card(stats_row, "0",    "ALERTES", self.warning_color, lambda: self._toggle_detail("alerts"))
-        self._stat_port    = self._make_stat_card(stats_row, "4444", "PORT",    self.accent_color,  lambda: self._toggle_detail("port"))
+        self._stats_row = tk.Frame(parent, bg=self.bg_main)
+        self._stats_row.pack(fill="x", pady=(0, 0))
+        self._stat_clients = self._make_stat_card(self._stats_row, "0",    "CLIENTS", self.success_color, lambda: self._toggle_detail("clients"))
+        self._stat_server  = self._make_stat_card(self._stats_row, "OFF",  "SERVEUR", self.error_color,   lambda: self._toggle_detail("server"))
+        self._stat_alerts  = self._make_stat_card(self._stats_row, "0",    "ALERTES", self.warning_color, lambda: self._toggle_detail("alerts"))
+        self._stat_port    = self._make_stat_card(self._stats_row, "4444", "PORT",    self.accent_color,  lambda: self._toggle_detail("port"))
 
-        # Inline detail panel — hidden by default, shown between cards and client list
+        # Inline detail panel — starts hidden, inserted after stats_row on demand
         self._detail_panel = tk.Frame(parent, bg=self.bg_card,
                                       highlightbackground=self.accent_color, highlightthickness=1)
         self._detail_panel_active = None  # which card is open
@@ -1300,9 +1300,8 @@ DÉMARRAGE RAPIDE:
                   "alerts":  self._render_detail_alerts,
                   "port":    self._render_detail_port}
         render[which](body)
-        # Show panel between stats and client list
-        self._detail_panel.pack(fill="x", pady=(4, 4),
-                                before=self._detail_panel.master.winfo_children()[1])
+        # Show panel right after the stats row
+        self._detail_panel.pack(fill="x", pady=(4, 4), after=self._stats_row)
 
     def _detail_row(self, parent, key, value):
         row = tk.Frame(parent, bg=self.bg_card)
