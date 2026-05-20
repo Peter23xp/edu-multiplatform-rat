@@ -1289,6 +1289,17 @@ DÉMARRAGE RAPIDE:
                         fps = frame_count / elapsed
                         self.root.after(0, lambda f=fps: self.stream_fps_label.config(text=f"FPS: {f:.1f}"))
                     send_msg(sock, "NEXT", key)
+                # Tell client to stop and drain its STREAM_END so the socket is clean
+                try:
+                    send_msg(sock, "STOP", key)
+                    # Drain any remaining frame or the STREAM_END the client sends back
+                    tail = recv_msg(sock, key)
+                    if tail and tail != b"STREAM_END":
+                        # One more frame arrived before STOP was processed — drain it
+                        send_msg(sock, "STOP", key)
+                        recv_msg(sock, key)
+                except Exception:
+                    pass
                 self.root.after(0, lambda: (self.stream_start_btn.config(state="normal"), self.stream_stop_btn.config(state="disabled")))
         except Exception as e:
             err_msg = str(e)
@@ -1314,9 +1325,6 @@ DÉMARRAGE RAPIDE:
 
     def stop_stream(self):
         self.streaming = False
-        if self.current_client_id:
-            sock, key = self._get_sock_key()
-            # stream_stop handled by sending non-NEXT or client sees STREAM_END
 
     def _show_stream_frame(self, img):
         cw = self.stream_canvas.winfo_width()

