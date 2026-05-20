@@ -258,11 +258,50 @@ def get_system_info():
     return " | ".join([f"{k}: {v}" for k, v in info.items()])
 
 
+_UNIX_TO_WIN = {
+    "ls": "dir",
+    "ls -la": "dir /a",
+    "ls -l": "dir",
+    "cat": "type",
+    "rm": "del",
+    "rm -rf": "rmdir /s /q",
+    "rmdir": "rmdir /s /q",
+    "mv": "move",
+    "cp": "copy",
+    "pwd": "cd",
+    "clear": "cls",
+    "touch": "type nul >",
+    "mkdir -p": "mkdir",
+    "grep": "findstr",
+    "which": "where",
+    "ps": "tasklist",
+    "kill": "taskkill /F /PID",
+    "ifconfig": "ipconfig",
+    "man": "help",
+}
+
+
+def _translate_command(command):
+    """Translate common Unix shell commands to Windows equivalents."""
+    if platform.system() != "Windows":
+        return command
+    stripped = command.strip()
+    lower = stripped.lower()
+    # Exact match first
+    if lower in _UNIX_TO_WIN:
+        return _UNIX_TO_WIN[lower]
+    # Prefix match (e.g. "ls /tmp" → "dir /tmp")
+    for unix, win in _UNIX_TO_WIN.items():
+        if lower.startswith(unix + " "):
+            return win + stripped[len(unix):]
+    return command
+
+
 def execute_command(command):
     # Intercept cd so the process cwd actually changes between commands
     stripped = command.strip()
     if stripped.lower().startswith("cd") and len(stripped) > 2 and stripped[2] in (" ", "\t"):
-        target = stripped[3:].strip().strip('"').strip("'")
+        target = stripped[3:].strip().strip('"').strip("'").strip()
         if not target:
             return os.getcwd()
         try:
@@ -276,6 +315,7 @@ def execute_command(command):
             return f"[!] cd: '{target}' — permission denied"
         except Exception as e:
             return f"[!] cd error: {e}"
+    command = _translate_command(command)
     try:
         if platform.system() == "Windows":
             process = subprocess.Popen(
