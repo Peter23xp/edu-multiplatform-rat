@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# ⚠️ Ce projet est à but pédagogique uniquement. Toute utilisation non autorisée est strictement interdite.
 # Connection test utility for Educational RAT
 
 import socket
@@ -7,10 +6,11 @@ import sys
 import platform
 import subprocess
 import ipaddress
-import time
 import os
+import base64
 
-HEADER = '\033[95m'
+HEADER_SIZE = 10
+
 BLUE = '\033[94m'
 GREEN = '\033[92m'
 YELLOW = '\033[93m'
@@ -18,180 +18,191 @@ RED = '\033[91m'
 END = '\033[0m'
 BOLD = '\033[1m'
 
-def clear_screen():
-    os.system('cls' if platform.system() == 'Windows' else 'clear')
+if platform.system() == "Windows":
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+    except:
+        BLUE = GREEN = YELLOW = RED = END = BOLD = ''
+
 
 def print_banner():
-    print(f"{BOLD}Educational RAT Connection Tester{END}")
-    print(f"{YELLOW}⚠️ For educational purposes only{END}")
+    print(f"\n{BOLD}Educational RAT - Connection Tester{END}")
+    print(f"{YELLOW}For educational purposes only{END}")
     print("-" * 50)
 
-def ping_host(host):
-    """Ping the host to check if it's reachable"""
-    print(f"{BLUE}[*] Pinging {host}...{END}")
-    param = '-n' if platform.system().lower() == 'windows' else '-c'
-    command = ['ping', param, '1', host]
-    try:
-        result = subprocess.call(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if result == 0:
-            print(f"{GREEN}[+] Host is pingable{END}")
-            return True
-        else:
-            print(f"{RED}[!] Host is not responding to ping{END}")
-            print(f"{YELLOW}    Note: Some servers block ICMP packets{END}")
-            return False
-    except:
-        print(f"{RED}[!] Ping failed{END}")
-        return False
 
-def check_localhost(host):
-    """Check if using localhost inappropriately"""
-    is_local_ip = False
+def get_local_ips():
+    ips = []
     try:
-        ip_obj = ipaddress.ip_address(host)
-        is_local_ip = ip_obj.is_loopback
-    except:
-        if host in ["localhost", "127.0.0.1"]:
-            is_local_ip = True
-    
-    if is_local_ip:
-        print(f"{YELLOW}[!] Using localhost/127.0.0.1 - this only works if client and server are on the same machine{END}")
-        print(f"{YELLOW}[!] For different machines, the server needs to use its LAN IP address{END}")
-        return True
-    return False
-
-def get_ip_info():
-    """Get all IP addresses for this machine"""
-    print(f"{BLUE}[*] Getting local IP information...{END}")
-    hostname = socket.gethostname()
-    print(f"{BLUE}[*] Hostname: {hostname}{END}")
-    
-    try:
-        # Get IP by hostname
-        ip = socket.gethostbyname(hostname)
-        print(f"{GREEN}[+] IP by hostname: {ip}{END}")
-    except:
-        print(f"{RED}[!] Could not get IP by hostname{END}")
-    
-    try:
-        # Try socket method
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(('8.8.8.8', 80))
-        ip = s.getsockname()[0]
+        ips.append(s.getsockname()[0])
         s.close()
-        print(f"{GREEN}[+] External IP: {ip} (recommended for LAN connections){END}")
     except:
-        print(f"{RED}[!] Could not determine external IP{END}")
-    
-    print(f"{BLUE}[*] Available IP addresses:{END}")
+        pass
     try:
-        # Try to get all IPs
-        for interface in socket.getaddrinfo(socket.gethostname(), None):
-            ip = interface[4][0]
-            if "." in ip:  # Only show IPv4
-                print(f"{GREEN}    • {ip}{END}")
+        for info in socket.getaddrinfo(socket.gethostname(), None):
+            ip = info[4][0]
+            if "." in ip and not ip.startswith("127.") and ip not in ips:
+                ips.append(ip)
     except:
-        print(f"{RED}    Could not enumerate IP addresses{END}")
+        pass
+    return ips
 
-def test_port(host, port):
-    """Test if port is open on the host"""
-    print(f"{BLUE}[*] Testing port {port} on {host}...{END}")
-    
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(3)
-    
+
+def test_ping(host):
+    print(f"\n{BLUE}[1] Ping test to {host}...{END}")
+    param = '-n' if platform.system().lower() == 'windows' else '-c'
     try:
+        result = subprocess.call(['ping', param, '1', host],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if result == 0:
+            print(f"    {GREEN}Host is reachable via ICMP{END}")
+            return True
+        else:
+            print(f"    {YELLOW}Host did not respond to ping (may still be reachable){END}")
+            return False
+    except:
+        print(f"    {RED}Ping failed{END}")
+        return False
+
+
+def test_tcp(host, port):
+    print(f"\n{BLUE}[2] TCP connection test to {host}:{port}...{END}")
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(5)
         s.connect((host, port))
         s.close()
-        print(f"{GREEN}[+] Port {port} is open!{END}")
+        print(f"    {GREEN}TCP connection successful! Server is accepting connections.{END}")
         return True
     except ConnectionRefusedError:
-        print(f"{RED}[!] Connection refused. The server is not running or is blocking connections.{END}")
-        print(f"{YELLOW}    Troubleshooting steps:{END}")
-        print(f"{YELLOW}    1. Make sure the server is running{END}")
-        print(f"{YELLOW}    2. Check that you're using the correct port{END}")
-        print(f"{YELLOW}    3. Check firewall settings{END}")
+        print(f"    {RED}Connection refused - server not running on this port{END}")
         return False
     except socket.timeout:
-        print(f"{RED}[!] Connection timed out.{END}")
-        print(f"{YELLOW}    The host may be behind a firewall that blocks this port{END}")
+        print(f"    {RED}Connection timed out - firewall blocking or wrong address{END}")
         return False
     except Exception as e:
-        print(f"{RED}[!] Error: {str(e)}{END}")
+        print(f"    {RED}Error: {e}{END}")
         return False
 
-def check_firewall():
-    """Provide firewall checking guidance"""
+
+def test_protocol(host, port):
+    print(f"\n{BLUE}[3] Protocol handshake test...{END}")
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(5)
+        s.connect((host, port))
+
+        raw_len = b""
+        while len(raw_len) < HEADER_SIZE:
+            chunk = s.recv(HEADER_SIZE - len(raw_len))
+            if not chunk:
+                print(f"    {RED}Server closed connection immediately{END}")
+                s.close()
+                return False
+            raw_len += chunk
+
+        msg_len = int(raw_len.decode())
+        data = b""
+        while len(data) < msg_len:
+            chunk = s.recv(min(65536, msg_len - len(data)))
+            if not chunk:
+                break
+            data += chunk
+
+        decoded = base64.b64decode(data).decode()
+        if decoded == "AUTH":
+            print(f"    {GREEN}Server sent AUTH challenge - protocol is working!{END}")
+            s.close()
+            return True
+        else:
+            print(f"    {YELLOW}Unexpected response: {decoded[:50]}{END}")
+            s.close()
+            return False
+    except Exception as e:
+        print(f"    {RED}Protocol test failed: {e}{END}")
+        return False
+
+
+def show_network_info():
+    print(f"\n{BLUE}[4] Local network information:{END}")
+    print(f"    Hostname: {socket.gethostname()}")
+    ips = get_local_ips()
+    for ip in ips:
+        print(f"    {GREEN}LAN IP: {ip}{END}")
+    if not ips:
+        print(f"    {YELLOW}Could not detect LAN IP{END}")
+    print(f"    Loopback: 127.0.0.1")
+
+
+def show_firewall_help():
+    print(f"\n{BLUE}[5] Firewall troubleshooting:{END}")
     system = platform.system()
-    
-    print(f"{BLUE}[*] Firewall checking guidance for {system}:{END}")
-    
     if system == "Windows":
-        print(f"{YELLOW}    • Open Windows Defender Firewall: Control Panel > System and Security > Windows Defender Firewall{END}")
-        print(f"{YELLOW}    • Click 'Allow an app or feature through Windows Defender Firewall'{END}")
-        print(f"{YELLOW}    • Check if Python is allowed for both private and public networks{END}")
-        print(f"{YELLOW}    • If not, click 'Change settings' > 'Allow another app' > browse to your Python executable{END}")
-    
+        print(f"    {YELLOW}Windows Firewall:{END}")
+        print(f"    - Control Panel > Windows Defender Firewall > Allow an app")
+        print(f"    - Ensure Python is allowed for Private and Public networks")
+        print(f"    - Or add inbound rule for your port in Advanced Settings")
     elif system == "Linux":
-        print(f"{YELLOW}    • Check iptables rules: sudo iptables -L{END}")
-        print(f"{YELLOW}    • Allow incoming connections: sudo iptables -A INPUT -p tcp --dport PORT -j ACCEPT{END}")
-        print(f"{YELLOW}    • Check if ufw is active: sudo ufw status{END}")
-        print(f"{YELLOW}    • Allow port with ufw: sudo ufw allow PORT/tcp{END}")
-    
-    elif system == "Darwin":  # macOS
-        print(f"{YELLOW}    • Check System Preferences > Security & Privacy > Firewall{END}")
-        print(f"{YELLOW}    • Click 'Firewall Options' and allow Python if it's in the list{END}")
-        print(f"{YELLOW}    • If not, click '+' and add Python application{END}")
+        print(f"    {YELLOW}Linux:{END}")
+        print(f"    - Check: sudo iptables -L / sudo ufw status")
+        print(f"    - Allow: sudo ufw allow <port>/tcp")
+    elif system == "Darwin":
+        print(f"    {YELLOW}macOS:{END}")
+        print(f"    - System Preferences > Security > Firewall > Allow Python")
+
 
 def main():
-    clear_screen()
+    if platform.system() == "Windows":
+        os.system('cls')
+    else:
+        os.system('clear')
+
     print_banner()
-    
-    print(f"{BOLD}This utility will help troubleshoot connection issues with the RAT server.{END}")
-    print()
-    
-    # Get system information
-    print(f"{BLUE}[*] System: {platform.system()} {platform.version()}{END}")
-    print(f"{BLUE}[*] Python: {platform.python_version()}{END}")
-    print()
-    
-    # Get server information
-    server_host = input("Enter server IP address [127.0.0.1]: ") or "127.0.0.1"
+
+    print(f"\n{BOLD}System: {platform.system()} {platform.release()}{END}")
+    print(f"{BOLD}Python: {platform.python_version()}{END}")
+
+    host = input(f"\nServer IP [{GREEN}127.0.0.1{END}]: ").strip() or "127.0.0.1"
     try:
-        server_port = int(input("Enter server port [4444]: ") or "4444")
+        port = int(input(f"Server Port [{GREEN}4444{END}]: ").strip() or "4444")
     except ValueError:
-        server_port = 4444
-    
+        port = 4444
+
+    try:
+        ip_obj = ipaddress.ip_address(host)
+        if ip_obj.is_loopback:
+            print(f"\n    {YELLOW}Note: Using loopback - only works on same machine{END}")
+    except ValueError:
+        pass
+
+    test_ping(host)
+    tcp_ok = test_tcp(host, port)
+
+    if tcp_ok:
+        test_protocol(host, port)
+
+    show_network_info()
+    show_firewall_help()
+
+    print(f"\n{BOLD}{'=' * 50}{END}")
+    if tcp_ok:
+        print(f"{GREEN}Server appears to be running and reachable!{END}")
+    else:
+        print(f"{RED}Could not connect to server. Check the issues above.{END}")
     print()
-    # Check if using localhost
-    check_localhost(server_host)
-    print()
-    
-    # Show local IP information
-    get_ip_info()
-    print()
-    
-    # Ping the server
-    ping_host(server_host)
-    print()
-    
-    # Test port
-    test_port(server_host, server_port)
-    print()
-    
-    # Firewall guidance
-    check_firewall()
-    print()
-    
-    print(f"{BOLD}Connection testing completed.{END}")
-    print(f"{YELLOW}If you're still having issues, please check the logs for both server and client.{END}")
+
+    input("Press Enter to exit...")
+
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\nTest interrupted by user.")
+        print("\nCancelled.")
     except Exception as e:
-        print(f"Error: {str(e)}")
-    
-    input("\nPress Enter to exit...") 
+        print(f"Error: {e}")
+        input("Press Enter to exit...")
