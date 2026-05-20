@@ -116,6 +116,16 @@ def _compute_backoff_delays(n_failures):
     return delays
 
 
+def _heartbeat_thread(sock, key, stop_event, interval=30):
+    """Sends PING every `interval` seconds. Stops if stop_event is set or socket dies."""
+    while not stop_event.is_set():
+        try:
+            send_msg(sock, "PING", key)
+        except Exception:
+            break
+        stop_event.wait(interval)
+
+
 def test_connection(host, port):
     logger.info(f"Target server: {host}:{port}")
     try:
@@ -391,10 +401,20 @@ def main():
             _reconnect_delay = 1
             logger.info("Authenticated, backoff reset")
 
+            # Heartbeat
+            hb_stop = threading.Event()
+            hb_thread = threading.Thread(
+                target=_heartbeat_thread,
+                args=(client, key, hb_stop),
+                daemon=True
+            )
+            hb_thread.start()
+
             while True:
                 command = recv_msg_str(client, key)
                 if command is None:
                     logger.warning("Connection lost")
+                    hb_stop.set()
                     break
 
                 if command == "sysinfo":
@@ -576,6 +596,11 @@ def main():
             logger.warning(f"Connection failed ({e}), retry in {_reconnect_delay}s")
         except Exception as e:
             logger.error(f"Error: {e}")
+        finally:
+            try:
+                hb_stop.set()
+            except NameError:
+                pass
 
         stream_stop_event.set()
         time.sleep(_reconnect_delay)

