@@ -446,18 +446,46 @@ class RATServerGUI:
 
     def _setup_clients(self, parent):
         parent.configure(bg=self.bg_main)
-        tk.Label(parent, text="Clients connectés", fg=self.accent_color, bg=self.bg_main,
-                 font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(0, 8))
-        frame = tk.Frame(parent, bg=self.bg_card,
-                          highlightbackground=self.border_color, highlightthickness=1)
-        frame.pack(fill="both", expand=True)
-        tk.Label(frame, text="Sélectionne un client pour l’activer, puis utilise les autres sections.",
-                 fg=self.text_muted, bg=self.bg_card, font=("Segoe UI", 9),
-                 anchor="w", padx=10).pack(fill="x", pady=(8, 4))
-        self._clients_detail_text = tk.Text(frame, bg=self.bg_console, fg=self.text_color,
-                                             font=("Consolas", 9), borderwidth=0,
-                                             highlightthickness=0, state="disabled")
-        self._clients_detail_text.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        hdr = tk.Frame(parent, bg=self.bg_main)
+        hdr.pack(fill="x", pady=(0, 8))
+        tk.Label(hdr, text="Clients connectés", fg=self.accent_color, bg=self.bg_main,
+                 font=("Segoe UI", 13, "bold")).pack(side="left")
+        ttk.Button(hdr, text="Actualiser", command=self.refresh_clients).pack(side="right")
+        ttk.Button(hdr, text="Kick tous", command=self.disconnect_all,
+                   style="Danger.TButton").pack(side="right", padx=(0, 6))
+
+        # Column headers
+        col_frame = tk.Frame(parent, bg=self.bg_input)
+        col_frame.pack(fill="x")
+        self._clients_col_widths = [4, 18, 16, 14, 12, 10, 10]
+        for txt, w in zip(["#", "IP : PORT", "HOSTNAME", "OS", "CHIFFR.", "ACTIF", "ACTIONS"],
+                          self._clients_col_widths):
+            tk.Label(col_frame, text=txt, fg=self.text_muted, bg=self.bg_input,
+                     font=("Segoe UI", 8, "bold"), width=w, anchor="w").pack(side="left", padx=4, pady=4)
+
+        # Scrollable rows container
+        outer = tk.Frame(parent, bg=self.bg_card,
+                         highlightbackground=self.border_color, highlightthickness=1)
+        outer.pack(fill="both", expand=True)
+        canvas = tk.Canvas(outer, bg=self.bg_card, highlightthickness=0)
+        sb = tk.Scrollbar(outer, orient="vertical", command=canvas.yview,
+                          bg=self.bg_sidebar, troughcolor=self.bg_main)
+        sb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        canvas.config(yscrollcommand=sb.set)
+        self._clients_rows_frame = tk.Frame(canvas, bg=self.bg_card)
+        self._clients_canvas_win = canvas.create_window((0, 0), window=self._clients_rows_frame, anchor="nw")
+        self._clients_rows_frame.bind("<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>",
+            lambda e: canvas.itemconfig(self._clients_canvas_win, width=e.width))
+        self._clients_canvas = canvas
+
+        # Empty state label
+        self._clients_empty_lbl = tk.Label(self._clients_rows_frame,
+            text="Aucun client connecté", fg=self.text_muted, bg=self.bg_card,
+            font=("Segoe UI", 10))
+        self._clients_empty_lbl.pack(pady=30)
 
 
     # ═══════════════════════════════════════════════════════════════════
@@ -1166,16 +1194,62 @@ DÉMARRAGE RAPIDE:
     # ═══════════════════════════════════════════════════════════════════
 
     def refresh_clients(self):
+        # Update sidebar listbox
         self.client_listbox.delete(0, tk.END)
         with self.lock:
-            for cid, c in self.clients.items():
-                node = ""
-                for p in c["info"].split("|"):
-                    if "Node:" in p: node = p.split(":")[1].strip(); break
-                marker = " [*]" if cid == self.current_client_id else ""
-                enc = "E" if c.get("key") else "P"
-                self.client_listbox.insert(tk.END, f"#{cid} [{enc}] {c['address'][0]} ({node}){marker}")
-        self.count_var.set(f"Clients: {len(self.clients)}")
+            snapshot = dict(self.clients)
+        for cid, c in snapshot.items():
+            node = ""
+            for p in c["info"].split("|"):
+                if "Node:" in p: node = p.split(":")[1].strip(); break
+            marker = " [*]" if cid == self.current_client_id else ""
+            enc = "E" if c.get("key") else "P"
+            self.client_listbox.insert(tk.END, f"#{cid} [{enc}] {c['address'][0]} ({node}){marker}")
+        self.count_var.set(f"Clients: {len(snapshot)}")
+
+        # Update Clients page table
+        if not hasattr(self, "_clients_rows_frame"):
+            return
+        for w in self._clients_rows_frame.winfo_children():
+            w.destroy()
+        if not snapshot:
+            tk.Label(self._clients_rows_frame, text="Aucun client connecté",
+                     fg=self.text_muted, bg=self.bg_card,
+                     font=("Segoe UI", 10)).pack(pady=30)
+            return
+        for cid, c in snapshot.items():
+            info = c.get("info", "")
+            node = os_name = release = version = "?"
+            for part in info.split("|"):
+                p = part.strip()
+                if p.startswith("Node:"):      node    = p[5:].strip()
+                elif p.startswith("System:"):  os_name = p[7:].strip()
+                elif p.startswith("Release:"): release = p[8:].strip()
+                elif p.startswith("Version:"): version = p[8:].strip()
+            enc    = "AES-256" if c.get("key") else "Aucun"
+            ip     = c["address"][0]
+            port   = c["address"][1]
+            active = cid == self.current_client_id
+            bg     = self.bg_input if active else self.bg_card
+            bdr    = self.accent_color if active else self.border_color
+            row = tk.Frame(self._clients_rows_frame, bg=bg,
+                           highlightbackground=bdr, highlightthickness=1)
+            row.pack(fill="x", pady=1, padx=2)
+            clr = self.accent_color if active else self.text_color
+            for txt, w in zip(
+                [f"#{cid}", f"{ip}:{port}", node, f"{os_name} {release}", enc,
+                 "● actif" if active else ""],
+                self._clients_col_widths[:-1]
+            ):
+                tk.Label(row, text=txt, fg=clr if txt else self.text_muted,
+                         bg=bg, font=("Consolas", 9),
+                         width=w, anchor="w").pack(side="left", padx=4, pady=5)
+            bf = tk.Frame(row, bg=bg)
+            bf.pack(side="right", padx=6)
+            ttk.Button(bf, text="Sélect.",
+                       command=lambda c=cid: self._select_cid(c)).pack(side="left", padx=2)
+            ttk.Button(bf, text="Kick", style="Danger.TButton",
+                       command=lambda c=cid: self._kick_cid(c)).pack(side="left", padx=2)
 
     def connect_to_client(self):
         sel = self.client_listbox.curselection()
