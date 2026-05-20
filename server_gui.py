@@ -113,6 +113,9 @@ class RATServerGUI:
             background=[("active", "#6aafc0"), ("disabled", self.bg_input)],
             foreground=[("disabled", self.text_muted)])
         self.style.configure("Danger.TButton", background=self.error_color, foreground=self.bg_main, font=("Segoe UI", 9, "bold"), padding=4)
+        self.style.map("Danger.TButton",
+            background=[("active", "#a94452"), ("disabled", self.bg_input)],
+            foreground=[("disabled", self.text_muted)])
         self.style.configure("TEntry",       fieldbackground=self.bg_input, foreground=self.text_color, insertcolor=self.text_color, borderwidth=1, relief="flat")
         self.style.configure("TNotebook",    background=self.bg_main)
         self.style.configure("TScrollbar",   background=self.bg_sidebar, troughcolor=self.bg_main, arrowcolor=self.text_muted)
