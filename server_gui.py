@@ -933,6 +933,7 @@ DÉMARRAGE RAPIDE:
         self.log_message(f"Encryption: {'AES-256' if AES_AVAILABLE else 'None (install pycryptodome)'}", "info")
 
         threading.Thread(target=self._accept_loop, daemon=True).start()
+        self.root.after(0, self._pulse_status)
 
         if self.auto_generate_var.get():
             ip = self.get_local_ip() if self.lan_mode_var.get() else "127.0.0.1"
@@ -958,6 +959,7 @@ DÉMARRAGE RAPIDE:
         self.stop_btn.config(state="disabled")
         self.log_message("Server stopped", "warning")
         self.refresh_clients()
+        self.root.title("EduRAT Console — Serveur arrêté")
 
     def _accept_loop(self):
         while not self.stop_flag.is_set():
@@ -981,7 +983,13 @@ DÉMARRAGE RAPIDE:
             if c.get("username") != self.auth_username_var.get() or c.get("password") != self.auth_password_var.get():
                 send_msg(sock, "AUTH_FAILED", key)
                 sock.close()
-                self.root.after(0, lambda: self.log_message(f"Auth failed: {addr[0]}", "warning"))
+                self.root.after(0, lambda: self.log_message(
+                    "Authentification échouée", "warning",
+                    client_ip=addr[0],
+                    operation="handshake",
+                    cause="Credentials incorrects (username/password refusé)",
+                    suggestion="Vérifier AUTH_USERNAME et AUTH_PASSWORD dans Paramètres"
+                ))
                 return
             send_msg(sock, "AUTH_SUCCESS", key)
             send_msg(sock, "sysinfo", key)
@@ -1010,6 +1018,7 @@ DÉMARRAGE RAPIDE:
             self.report.set_target(addr[0], info.split("|")[1].split(":")[1].strip() if "|" in info else "Unknown", info)
         self.refresh_clients()
         self._update_indicator("connected")
+        self.root.title(f"EduRAT Console — {len(self.clients)} client(s) connecté(s)")
 
     def _get_sock_key(self):
         if self.current_client_id is None:
@@ -1628,6 +1637,16 @@ DÉMARRAGE RAPIDE:
             self._stat_server.config(text=srv_val.get(status, "OFF"), fg=srv_clr.get(status, self.error_color))
         self._clients_badge.config(text=f"{n} client{'s' if n != 1 else ''}")
         self.count_var.set(f"Clients: {n}")
+
+    def _pulse_status(self):
+        if not hasattr(self, "_status_badge"):
+            return
+        txt = self._status_badge.cget("text")
+        if "ACTIF" in txt or "ÉCOUTE" in txt:
+            current = self._status_badge.cget("fg")
+            toggle = self.success_color if current == self.text_muted else self.text_muted
+            self._status_badge.config(fg=toggle)
+            self.root.after(1000, self._pulse_status)
 
     def get_local_ip(self):
         try:
