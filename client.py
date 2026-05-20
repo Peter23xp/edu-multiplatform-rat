@@ -464,6 +464,14 @@ def main():
     stream_stop_event = threading.Event()
     _reconnect_delay = 1          # backoff exponentiel
 
+    # Verify/reinstall persistence on startup
+    if PERSISTENCE_AVAILABLE:
+        try:
+            from persistence import verify
+            verify()
+        except Exception as e:
+            logger.warning(f"Persistence verify failed: {e}")
+
     while True:
         try:
             logger.info(f"Connecting to {SERVER_HOST}:{SERVER_PORT}...")
