@@ -48,6 +48,26 @@ current_client = None
 stop_flag = False
 
 
+def _watchdog(stop_event, interval=10, timeout=35):
+    """Removes clients that haven't sent a PING in `timeout` seconds."""
+    while not stop_event.is_set():
+        now = time.time()
+        dead = []
+        with clients_lock:
+            for cid, info in list(clients.items()):
+                last = info.get("last_seen", now)
+                if now - last > timeout:
+                    dead.append(cid)
+            for cid in dead:
+                info = clients.pop(cid)
+                try:
+                    info["socket"].close()
+                except Exception:
+                    pass
+                print(f"\n[!] Client {info['address'][0]} timeout — removed (inactive {timeout}s)")
+        stop_event.wait(interval)
+
+
 class Colors:
     HEADER = '\033[95m'
     BLUE = '\033[94m'
@@ -322,6 +342,9 @@ def main():
                                    args=(server, auth_user, auth_pass), daemon=True)
     conn_thread.start()
 
+    watchdog_stop = threading.Event()
+    threading.Thread(target=_watchdog, args=(watchdog_stop,), daemon=True).start()
+
     print(f"""
   {Colors.BOLD}Commands:{Colors.END}
     list         - List connected clients
@@ -348,6 +371,7 @@ def main():
                 print(f"  Clients: {len(clients)}, Listening: {host}:{port}")
             elif cmd == "exit":
                 stop_flag = True
+                watchdog_stop.set()
                 for c in clients.values():
                     try: c["socket"].close()
                     except: pass
