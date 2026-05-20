@@ -102,7 +102,12 @@ import ipaddress
 
 
 def _compute_backoff_delays(n_failures):
-    """Retourne la liste des delais pour n echecs consecutifs (cap 60s)."""
+    """Retourne la liste des delais pour n echecs consecutifs (cap 60s).
+
+    Fonction pure utilisee comme reference testable pour la logique de backoff
+    exponentiel implementee dans main(). Toute modification de la formule doit
+    etre repercutee dans les deux endroits.
+    """
     delays = []
     d = 1
     for _ in range(n_failures):
@@ -361,12 +366,12 @@ def main():
 
     while True:
         try:
-            logger.info(f"Connecting to {SERVER_HOST}:{SERVER_PORT}... (next retry in {_reconnect_delay}s if fail)")
+            logger.info(f"Connecting to {SERVER_HOST}:{SERVER_PORT}...")
             client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             client.settimeout(10)
             client.connect((SERVER_HOST, SERVER_PORT))
             client.settimeout(None)
-            _reconnect_delay = 1  # reset au succes
+            # Ne pas reset _reconnect_delay ici: on attend le succes de l'auth
             logger.info("Connected!")
 
             # Derive encryption key
@@ -378,9 +383,13 @@ def main():
 
             if not authenticate(client, key):
                 client.close()
-                time.sleep(_reconnect_delay)
-                _reconnect_delay = min(_reconnect_delay * 2, 60)
+                # Pas de reset du backoff: laisser remonter vers le bas de la
+                # boucle qui s'occupe du sleep + doublement (voir _compute_backoff_delays)
                 continue
+
+            # Auth reussie: reset du backoff exponentiel
+            _reconnect_delay = 1
+            logger.info("Authenticated, backoff reset")
 
             while True:
                 command = recv_msg_str(client, key)
@@ -570,6 +579,7 @@ def main():
 
         stream_stop_event.set()
         time.sleep(_reconnect_delay)
+        # Backoff: voir _compute_backoff_delays pour la logique de reference
         _reconnect_delay = min(_reconnect_delay * 2, 60)
 
 
