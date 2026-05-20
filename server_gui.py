@@ -816,10 +816,17 @@ DÉMARRAGE RAPIDE:
 
     def log_message(self, msg, level="info", client_ip=None, operation=None,
                     cause=None, suggestion=None):
+        import threading as _threading
+        if _threading.current_thread() is not _threading.main_thread():
+            self.root.after(0, lambda: self.log_message(
+                msg, level, client_ip=client_ip, operation=operation,
+                cause=cause, suggestion=suggestion))
+            return
         try:
             self.console.config(state="normal")
             colors   = {"info": self.text_color, "success": self.success_color,
-                        "warning": self.warning_color, "error": self.error_color}
+                        "warning": self.warning_color, "error": self.error_color,
+                        "timeout": self.orange_color}
             prefixes = {"info": "[*]", "success": "[+]", "warning": "[!]",
                         "error": "[✕]", "timeout": "[⏱]"}
             color = colors.get(level, self.text_color)
@@ -835,9 +842,9 @@ DÉMARRAGE RAPIDE:
         except Exception:
             pass
         if level in ("error", "warning", "timeout") and (client_ip or cause or suggestion):
-            self.root.after(0, lambda: self.show_notification(
+            self.show_notification(
                 level, msg, client_ip=client_ip, operation=operation,
-                cause=cause, suggestion=suggestion))
+                cause=cause, suggestion=suggestion)
 
     def show_notification(self, level, title, client_ip=None, operation=None,
                            cause=None, suggestion=None):
@@ -886,6 +893,9 @@ DÉMARRAGE RAPIDE:
                      bg=bg_clr, font=("Segoe UI", 8), anchor="w").pack(side="left")
         notif.pack(fill="x", pady=2)
         self._notif_widgets.append(notif)
+        # Keep max 15 notifications — dismiss oldest if exceeded
+        if len(self._notif_widgets) > 15:
+            self._dismiss_notification(self._notif_widgets[0])
         if level in ("error", "warning", "timeout"):
             self._alert_count += 1
             self._alert_badge.config(text=f"⚠ {self._alert_count} alerte{'s' if self._alert_count > 1 else ''}")
@@ -1067,12 +1077,25 @@ DÉMARRAGE RAPIDE:
 
     def _send_recv_bytes(self, cmd):
         sock, key = self._get_sock_key()
-        if not sock: return None
+        if not sock:
+            return None
         try:
             send_msg(sock, cmd, key)
             return recv_msg(sock, key)
+        except socket.timeout:
+            cip = self.clients.get(self.current_client_id, {}).get("address", ("?",))[0]
+            self.log_message("Timeout opération binaire", "timeout",
+                              client_ip=cip, operation=cmd[:30],
+                              cause="Délai de réponse dépassé (15s)",
+                              suggestion="Vérifier la connexion réseau")
+            self._drop_client()
+            return None
         except Exception as e:
-            self.log_message(f"Error: {e}", "error")
+            cip = self.clients.get(self.current_client_id, {}).get("address", ("?",))[0]
+            self.log_message("Erreur opération binaire", "error",
+                              client_ip=cip, operation=cmd[:30],
+                              cause=str(e),
+                              suggestion="Vérifier la connexion réseau et relancer le client")
             self._drop_client()
             return None
 
