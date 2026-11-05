@@ -1,0 +1,165 @@
+<h2>Design Détaillé — Layout & Navigation</h2>
+<p class="subtitle">Section 1/3 — Structure générale de la fenêtre. Les 14 onglets actuels regroupés en 5 catégories dans une barre top.</p>
+
+<div class="mockup">
+  <div class="mockup-header">Fenêtre principale — RAT Éducatif</div>
+  <div class="mockup-body" style="padding:0;overflow:hidden">
+    <div style="background:#1a1e2e;font-family:'Consolas',monospace;font-size:11px;min-height:420px">
+
+      <!-- Title bar -->
+      <div style="background:#0f1117;padding:6px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #2e3440">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="color:#bf616a;font-size:14px">⬡</span>
+          <span style="color:#eceff4;font-size:12px;font-weight:bold">EduRAT Console</span>
+          <span style="background:#a3be8c22;color:#a3be8c;border:1px solid #a3be8c44;border-radius:10px;padding:1px 8px;font-size:9px">● SERVEUR ACTIF</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <span style="color:#d8dee9;font-size:10px">2 clients connectés</span>
+          <span style="background:#88c0d022;color:#88c0d0;border:1px solid #88c0d044;border-radius:4px;padding:2px 8px;font-size:9px">Port 4444</span>
+        </div>
+      </div>
+
+      <!-- Group tabs bar -->
+      <div style="background:#141824;padding:0 12px;display:flex;align-items:stretch;border-bottom:2px solid #2e3440;gap:2px">
+        <div style="padding:8px 14px;color:#88c0d0;border-bottom:2px solid #88c0d0;font-size:10px;font-weight:bold;cursor:pointer;margin-bottom:-2px">⚡ CONTRÔLE</div>
+        <div style="padding:8px 14px;color:#4c566a;font-size:10px;cursor:pointer">🔍 SURVEILLANCE</div>
+        <div style="padding:8px 14px;color:#4c566a;font-size:10px;cursor:pointer">📁 FICHIERS</div>
+        <div style="padding:8px 14px;color:#4c566a;font-size:10px;cursor:pointer">🌐 RÉSEAU</div>
+        <div style="padding:8px 14px;color:#4c566a;font-size:10px;cursor:pointer">⚙ CONFIG</div>
+        <div style="margin-left:auto;padding:8px 0;display:flex;align-items:center;gap:6px">
+          <span style="color:#ebcb8b;font-size:9px;background:#ebcb8b18;border:1px solid #ebcb8b33;border-radius:4px;padding:2px 6px">1 avertissement</span>
+        </div>
+      </div>
+
+      <!-- Sub-tabs (for active group) -->
+      <div style="background:#1a1e2e;padding:4px 12px;display:flex;gap:2px;border-bottom:1px solid #2e3440">
+        <div style="padding:4px 10px;background:#2e3440;border-radius:4px 4px 0 0;color:#eceff4;font-size:9px">Dashboard</div>
+        <div style="padding:4px 10px;color:#4c566a;font-size:9px;cursor:pointer">Terminal</div>
+        <div style="padding:4px 10px;color:#4c566a;font-size:9px;cursor:pointer">Clients</div>
+      </div>
+
+      <!-- Main content area -->
+      <div style="display:flex;gap:0;height:280px">
+
+        <!-- Client list panel -->
+        <div style="width:180px;background:#141824;border-right:1px solid #2e3440;padding:8px;display:flex;flex-direction:column;gap:4px">
+          <div style="color:#4c566a;font-size:8px;text-transform:uppercase;letter-spacing:1px;margin-bottom:2px">Clients (2)</div>
+          <div style="background:#2e3440;border:1px solid #a3be8c44;border-radius:5px;padding:6px;cursor:pointer">
+            <div style="display:flex;align-items:center;gap:5px">
+              <span style="color:#a3be8c;font-size:10px">●</span>
+              <span style="color:#eceff4;font-size:9px;font-weight:bold">192.168.1.10</span>
+            </div>
+            <div style="color:#4c566a;font-size:8px;margin-top:2px;padding-left:15px">Windows 11 · x64</div>
+          </div>
+          <div style="background:#1e2433;border:1px solid #2e3440;border-radius:5px;padding:6px;cursor:pointer">
+            <div style="display:flex;align-items:center;gap:5px">
+              <span style="color:#a3be8c;font-size:10px">●</span>
+              <span style="color:#d8dee9;font-size:9px">192.168.1.15</span>
+            </div>
+            <div style="color:#4c566a;font-size:8px;margin-top:2px;padding-left:15px">Ubuntu 22.04 · x64</div>
+          </div>
+        </div>
+
+        <!-- Main content -->
+        <div style="flex:1;padding:10px;display:flex;flex-direction:column;gap:8px">
+
+          <!-- Stats row -->
+          <div style="display:flex;gap:8px">
+            <div style="flex:1;background:#141824;border-radius:6px;padding:8px;text-align:center">
+              <div style="color:#a3be8c;font-size:18px;font-weight:bold">2</div>
+              <div style="color:#4c566a;font-size:8px">CLIENTS</div>
+            </div>
+            <div style="flex:1;background:#141824;border-radius:6px;padding:8px;text-align:center">
+              <div style="color:#88c0d0;font-size:18px;font-weight:bold">ON</div>
+              <div style="color:#4c566a;font-size:8px">SERVEUR</div>
+            </div>
+            <div style="flex:1;background:#141824;border-radius:6px;padding:8px;text-align:center">
+              <div style="color:#ebcb8b;font-size:18px;font-weight:bold">1</div>
+              <div style="color:#4c566a;font-size:8px">ALERTES</div>
+            </div>
+            <div style="flex:1;background:#141824;border-radius:6px;padding:8px;text-align:center">
+              <div style="color:#d8dee9;font-size:18px;font-weight:bold">4444</div>
+              <div style="color:#4c566a;font-size:8px">PORT</div>
+            </div>
+          </div>
+
+          <!-- Error notification example -->
+          <div style="background:#bf616a12;border:1px solid #bf616a44;border-left:3px solid #bf616a;border-radius:5px;padding:8px 10px">
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <div style="display:flex;align-items:center;gap:6px">
+                <span style="color:#bf616a;font-size:11px">✕</span>
+                <span style="color:#bf616a;font-size:9px;font-weight:bold">ERREUR — Screenshot échoué</span>
+                <span style="color:#4c566a;font-size:8px">· 14:32:05</span>
+              </div>
+              <span style="color:#4c566a;font-size:9px;cursor:pointer">✕</span>
+            </div>
+            <div style="color:#d8dee9;font-size:8px;margin-top:4px">
+              Client: <span style="color:#88c0d0">192.168.1.10</span> · Opération: <span style="color:#88c0d0">capture_ecran</span> · Raison: <span style="color:#ebcb8b">Module pyautogui non installé</span>
+            </div>
+            <div style="color:#5e81ac;font-size:8px;margin-top:3px">→ Suggestion: Installer pyautogui sur le client cible (pip install pyautogui)</div>
+          </div>
+
+          <!-- Console preview -->
+          <div style="flex:1;background:#0f1117;border-radius:6px;padding:8px;overflow:hidden">
+            <div style="color:#4c566a;font-size:8px;margin-bottom:4px">CONSOLE</div>
+            <div style="color:#a3be8c;font-size:9px">[14:30:01] [+] Serveur démarré sur 0.0.0.0:4444</div>
+            <div style="color:#88c0d0;font-size:9px">[14:30:45] [*] Nouveau client: 192.168.1.10 (Windows 11)</div>
+            <div style="color:#88c0d0;font-size:9px">[14:31:02] [*] Nouveau client: 192.168.1.15 (Ubuntu 22.04)</div>
+            <div style="color:#bf616a;font-size:9px">[14:32:05] [✕] Screenshot — 192.168.1.10 — pyautogui absent</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:16px">
+  <h3>Structure des 5 groupes d'onglets</h3>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px">
+    <div style="background:var(--bg-secondary,#1a1f2e);border-radius:6px;padding:10px">
+      <div style="color:#88c0d0;font-weight:bold;font-size:13px;margin-bottom:6px">⚡ Contrôle</div>
+      <ul style="margin:0;padding-left:16px;font-size:12px;color:#d8dee9">
+        <li>Dashboard (métriques globales)</li>
+        <li>Terminal (commandes)</li>
+        <li>Clients (liste détaillée)</li>
+      </ul>
+    </div>
+    <div style="background:var(--bg-secondary,#1a1f2e);border-radius:6px;padding:10px">
+      <div style="color:#a3be8c;font-weight:bold;font-size:13px;margin-bottom:6px">🔍 Surveillance</div>
+      <ul style="margin:0;padding-left:16px;font-size:12px;color:#d8dee9">
+        <li>Écran (screenshots + live stream)</li>
+        <li>Webcam</li>
+        <li>Keylogger</li>
+        <li>Presse-papier</li>
+      </ul>
+    </div>
+    <div style="background:var(--bg-secondary,#1a1f2e);border-radius:6px;padding:10px">
+      <div style="color:#ebcb8b;font-weight:bold;font-size:13px;margin-bottom:6px">📁 Fichiers</div>
+      <ul style="margin:0;padding-left:16px;font-size:12px;color:#d8dee9">
+        <li>Explorateur (navigation)</li>
+        <li>Transfert (upload/download)</li>
+      </ul>
+    </div>
+    <div style="background:var(--bg-secondary,#1a1f2e);border-radius:6px;padding:10px">
+      <div style="color:#b48ead;font-weight:bold;font-size:13px;margin-bottom:6px">🌐 Réseau</div>
+      <ul style="margin:0;padding-left:16px;font-size:12px;color:#d8dee9">
+        <li>Scanner réseau</li>
+        <li>Persistance</li>
+        <li>Info système</li>
+      </ul>
+    </div>
+    <div style="background:var(--bg-secondary,#1a1f2e);border-radius:6px;padding:10px;grid-column:span 2">
+      <div style="color:#d08770;font-weight:bold;font-size:13px;margin-bottom:6px">⚙ Config</div>
+      <ul style="margin:0;padding-left:16px;font-size:12px;color:#d8dee9;columns:2">
+        <li>Paramètres serveur</li>
+        <li>Génération client</li>
+        <li>Défense / Détection</li>
+        <li>Rapports</li>
+        <li>Aide</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top:12px">Est-ce que ce layout et ce regroupement des onglets te conviennent ? Réponds dans le terminal.</p>

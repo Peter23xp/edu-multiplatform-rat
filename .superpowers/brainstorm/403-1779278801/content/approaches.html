@@ -1,0 +1,137 @@
+<h2>3 Approches de Design pour le RAT GUI</h2>
+<p class="subtitle">Chaque approche garde le dark theme moderne, la sidebar regroupée, et des messages d'erreur contextuels. Les différences sont dans la densité et le style visuel.</p>
+
+<div class="cards">
+
+  <div class="card" data-choice="A" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="background:#1a1e2e;border-radius:8px;padding:12px;font-family:monospace;font-size:11px;height:180px;overflow:hidden;position:relative">
+        <div style="display:flex;height:100%">
+          <div style="width:52px;background:#141824;border-radius:6px;padding:6px 4px;display:flex;flex-direction:column;gap:4px;margin-right:8px">
+            <div style="background:#4c566a;border-radius:4px;padding:4px;text-align:center;font-size:9px;color:#88c0d0">⚡</div>
+            <div style="background:#2e3440;border-radius:4px;padding:4px;text-align:center;font-size:9px;color:#d8dee9">🖥</div>
+            <div style="background:#2e3440;border-radius:4px;padding:4px;text-align:center;font-size:9px;color:#d8dee9">📁</div>
+            <div style="background:#2e3440;border-radius:4px;padding:4px;text-align:center;font-size:9px;color:#d8dee9">🌐</div>
+            <div style="background:#2e3440;border-radius:4px;padding:4px;text-align:center;font-size:9px;color:#d8dee9">⚙</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+            <div style="background:#141824;border-radius:6px;padding:6px">
+              <div style="color:#88c0d0;font-size:9px;margin-bottom:4px">CLIENTS CONNECTÉS (2)</div>
+              <div style="background:#2e3440;border-radius:4px;padding:4px;color:#a3be8c;font-size:9px">● 192.168.1.10 — Windows 11</div>
+              <div style="background:#2e3440;border-radius:4px;padding:4px;color:#a3be8c;font-size:9px;margin-top:2px">● 192.168.1.15 — Ubuntu 22</div>
+            </div>
+            <div style="background:#bf616a22;border:1px solid #bf616a55;border-radius:6px;padding:6px">
+              <div style="color:#bf616a;font-size:9px;font-weight:bold">⚠ Screenshot échoué</div>
+              <div style="color:#d8dee9;font-size:8px;margin-top:2px">Client: 192.168.1.10 | pyautogui non installé</div>
+              <div style="color:#88c0d0;font-size:8px;margin-top:2px">→ pip install pyautogui sur le client</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A — Compact Icons Sidebar</h3>
+      <p>Sidebar minimaliste avec icônes + tooltips. Catégories : Contrôle, Surveillance, Fichiers, Réseau, Config. Erreurs en bandeaux contextuels inline.</p>
+      <div class="pros-cons" style="margin-top:8px">
+        <div class="pros"><h4>+</h4><ul><li>Maximise l'espace de travail</li><li>Navigation ultra-rapide</li></ul></div>
+        <div class="cons"><h4>−</h4><ul><li>Nécessite mémoriser les icônes</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" data-choice="B" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="background:#1a1e2e;border-radius:8px;padding:12px;font-family:monospace;font-size:11px;height:180px;overflow:hidden;position:relative">
+        <div style="display:flex;height:100%">
+          <div style="width:110px;background:#141824;border-radius:6px;padding:6px;margin-right:8px;display:flex;flex-direction:column;gap:2px">
+            <div style="color:#4c566a;font-size:8px;text-transform:uppercase;margin-bottom:2px;padding-left:4px">Contrôle</div>
+            <div style="background:#3b4252;border-radius:4px;padding:4px 6px;color:#88c0d0;font-size:9px">⚡ Dashboard</div>
+            <div style="background:#2e3440;border-radius:4px;padding:4px 6px;color:#d8dee9;font-size:9px">🖥 Terminal</div>
+            <div style="color:#4c566a;font-size:8px;text-transform:uppercase;margin:4px 0 2px;padding-left:4px">Surveillance</div>
+            <div style="background:#2e3440;border-radius:4px;padding:4px 6px;color:#d8dee9;font-size:9px">📸 Écran</div>
+            <div style="background:#2e3440;border-radius:4px;padding:4px 6px;color:#d8dee9;font-size:9px">⌨ Keylogger</div>
+            <div style="background:#2e3440;border-radius:4px;padding:4px 6px;color:#d8dee9;font-size:9px">📋 Presse-papier</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+            <div style="background:#141824;border-radius:6px;padding:6px">
+              <div style="color:#88c0d0;font-size:9px;margin-bottom:3px">DASHBOARD</div>
+              <div style="display:flex;gap:4px">
+                <div style="background:#a3be8c22;border:1px solid #a3be8c44;border-radius:4px;padding:4px;flex:1;text-align:center">
+                  <div style="color:#a3be8c;font-size:11px;font-weight:bold">2</div>
+                  <div style="color:#d8dee9;font-size:7px">Clients</div>
+                </div>
+                <div style="background:#88c0d022;border:1px solid #88c0d044;border-radius:4px;padding:4px;flex:1;text-align:center">
+                  <div style="color:#88c0d0;font-size:11px;font-weight:bold">ON</div>
+                  <div style="color:#d8dee9;font-size:7px">Serveur</div>
+                </div>
+              </div>
+            </div>
+            <div style="background:#bf616a18;border-left:3px solid #bf616a;border-radius:4px;padding:5px 8px">
+              <div style="color:#bf616a;font-size:9px;font-weight:bold">ERREUR · Webcam</div>
+              <div style="color:#d8dee9;font-size:8px">Client 192.168.1.10 · OpenCV absent</div>
+              <div style="color:#5e81ac;font-size:8px">Suggestion: pip install opencv-python</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B — Sidebar avec Labels + Groupes (Recommandé)</h3>
+      <p>Sidebar avec texte + groupes nommés. 5 catégories : Contrôle, Surveillance, Fichiers, Réseau, Config. Dashboard avec métriques. Erreurs avec barre colorée latérale.</p>
+      <div class="pros-cons" style="margin-top:8px">
+        <div class="pros"><h4>+</h4><ul><li>Navigation intuitive sans apprentissage</li><li>Groupes clairs et logiques</li><li>Dashboard donne vision globale</li></ul></div>
+        <div class="cons"><h4>−</h4><ul><li>Prend plus de largeur que les icônes</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" data-choice="C" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="background:#1a1e2e;border-radius:8px;padding:12px;font-family:monospace;font-size:11px;height:180px;overflow:hidden;position:relative">
+        <div style="display:flex;flex-direction:column;height:100%;gap:6px">
+          <div style="background:#141824;border-radius:6px;padding:6px;display:flex;gap:6px;align-items:center">
+            <span style="color:#a3be8c;font-size:9px">● Serveur ON</span>
+            <span style="color:#4c566a">|</span>
+            <span style="color:#88c0d0;font-size:9px">2 clients</span>
+            <div style="margin-left:auto;display:flex;gap:3px">
+              <div style="background:#2e3440;border-radius:3px;padding:2px 6px;color:#88c0d0;font-size:8px">Contrôle</div>
+              <div style="background:#3b4252;border-radius:3px;padding:2px 6px;color:#d8dee9;font-size:8px">Surveill.</div>
+              <div style="background:#2e3440;border-radius:3px;padding:2px 6px;color:#d8dee9;font-size:8px">Fichiers</div>
+              <div style="background:#2e3440;border-radius:3px;padding:2px 6px;color:#d8dee9;font-size:8px">Réseau</div>
+            </div>
+          </div>
+          <div style="display:flex;flex:1;gap:6px">
+            <div style="flex:1;background:#141824;border-radius:6px;padding:6px">
+              <div style="color:#88c0d0;font-size:9px;margin-bottom:4px">CLIENTS</div>
+              <div style="background:#2e3440;border-radius:4px;padding:4px;color:#a3be8c;font-size:8px">● 192.168.1.10</div>
+              <div style="background:#2e3440;border-radius:4px;padding:4px;color:#a3be8c;font-size:8px;margin-top:2px">● 192.168.1.15</div>
+            </div>
+            <div style="flex:2;background:#141824;border-radius:6px;padding:6px;display:flex;flex-direction:column;gap:4px">
+              <div style="color:#d8dee9;font-size:8px">Commande:</div>
+              <div style="background:#2e3440;border-radius:4px;padding:3px;display:flex;gap:3px">
+                <span style="color:#4c566a;font-size:8px">$</span>
+                <span style="color:#a3be8c;font-size:8px">whoami</span>
+              </div>
+              <div style="background:#ebcb8b18;border:1px solid #ebcb8b44;border-radius:4px;padding:4px">
+                <div style="color:#ebcb8b;font-size:8px">⚠ Timeout après 15s</div>
+                <div style="color:#d8dee9;font-size:7px">Client: 192.168.1.15 · Cmd: whoami · Code: TIMEOUT</div>
+                <div style="color:#88c0d0;font-size:7px">→ Vérifier connexion ou augmenter timeout dans Settings</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C — Top Tabs Groupés + Layout Horizontal</h3>
+      <p>Garder les onglets mais regroupés en 4-5 catégories dans une barre top. Layout horizontal : liste clients à gauche, contenu à droite. Plus proche du design actuel.</p>
+      <div class="pros-cons" style="margin-top:8px">
+        <div class="pros"><h4>+</h4><ul><li>Migration douce depuis le design actuel</li><li>Familier pour l'utilisateur</li></ul></div>
+        <div class="cons"><h4>−</h4><ul><li>Moins de place verticale</li><li>Moins moderne qu'une sidebar</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<p class="subtitle" style="margin-top:16px">Ma recommandation : <strong>B</strong> — sidebar avec labels et groupes. Intuitif, moderne, et laisse beaucoup d'espace pour le contenu principal. Clique pour sélectionner.</p>

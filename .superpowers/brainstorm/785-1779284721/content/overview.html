@@ -1,0 +1,93 @@
+<h2>Plan d'amélioration — Vue d'ensemble</h2>
+<p class="subtitle">3 sous-projets indépendants. Chacun apporte une amélioration concrète. On les fait dans l'ordre.</p>
+
+<div style="display:flex;flex-direction:column;gap:16px;margin-top:16px">
+
+  <!-- SP1 -->
+  <div style="background:#1a1e2e;border:1px solid #88c0d033;border-left:4px solid #88c0d0;border-radius:8px;padding:16px 20px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <span style="background:#88c0d0;color:#0f1117;font-weight:bold;border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0">1</span>
+      <span style="color:#88c0d0;font-size:15px;font-weight:bold">Robustesse C2</span>
+      <span style="background:#88c0d022;color:#88c0d0;border-radius:4px;padding:2px 8px;font-size:10px;margin-left:auto">À FAIRE EN PREMIER</span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:12px">
+      <div>
+        <div style="color:#bf616a;margin-bottom:6px;font-size:10px;text-transform:uppercase">Problème actuel</div>
+        <div style="color:#d8dee9;line-height:1.8">
+          • Client crash → données perdues<br>
+          • Pas de reconnexion automatique<br>
+          • Serveur croit le client vivant<br>
+          • Pas de keepalive / heartbeat
+        </div>
+      </div>
+      <div>
+        <div style="color:#a3be8c;margin-bottom:6px;font-size:10px;text-transform:uppercase">Après fix</div>
+        <div style="color:#d8dee9;line-height:1.8">
+          • Reconnexion exponentielle (1s→2s→4s…max 60s)<br>
+          • Heartbeat toutes les 30s bidirectionnel<br>
+          • Serveur détecte client mort en ~35s<br>
+          • Watchdog relance le client si bloqué
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SP2 -->
+  <div style="background:#1a1e2e;border:1px solid #a3be8c33;border-left:4px solid #a3be8c;border-radius:8px;padding:16px 20px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <span style="background:#a3be8c;color:#0f1117;font-weight:bold;border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0">2</span>
+      <span style="color:#a3be8c;font-size:15px;font-weight:bold">Exfiltration automatique</span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:12px">
+      <div>
+        <div style="color:#bf616a;margin-bottom:6px;font-size:10px;text-transform:uppercase">Problème actuel</div>
+        <div style="color:#d8dee9;line-height:1.8">
+          • Keylogger garde les données en RAM<br>
+          • Clipboard jamais envoyé seul<br>
+          • Screenshots uniquement sur demande<br>
+          • Tout se perd si connexion coupe
+        </div>
+      </div>
+      <div>
+        <div style="color:#a3be8c;margin-bottom:6px;font-size:10px;text-transform:uppercase">Après fix</div>
+        <div style="color:#d8dee9;line-height:1.8">
+          • Envoi auto keylogger toutes les 60s<br>
+          • Clipboard envoyé si changement détecté<br>
+          • File d'attente locale si pas de connexion<br>
+          • Données sauvées sur disque (survie reboot)
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SP3 -->
+  <div style="background:#1a1e2e;border:1px solid #ebcb8b33;border-left:4px solid #ebcb8b;border-radius:8px;padding:16px 20px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <span style="background:#ebcb8b;color:#0f1117;font-weight:bold;border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0">3</span>
+      <span style="color:#ebcb8b;font-size:15px;font-weight:bold">Persistance discrète</span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:12px">
+      <div>
+        <div style="color:#bf616a;margin-bottom:6px;font-size:10px;text-transform:uppercase">Problème actuel</div>
+        <div style="color:#d8dee9;line-height:1.8">
+          • Noms hardcodés (EduRAT_Service…)<br>
+          • Un seul point de persistance<br>
+          • Facile à détecter et supprimer<br>
+          • Chemin absolu qui casse si déplacé
+        </div>
+      </div>
+      <div>
+        <div style="color:#a3be8c;margin-bottom:6px;font-size:10px;text-transform:uppercase">Après fix</div>
+        <div style="color:#d8dee9;line-height:1.8">
+          • Noms générés aléatoirement<br>
+          • 3 méthodes fallback si la 1ère échoue<br>
+          • Vérification + réinstall automatique<br>
+          • Chemins dynamiques basés sur l'env
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<p class="subtitle" style="margin-top:20px">On commence par le <strong style="color:#88c0d0">Sous-projet 1</strong>. La page suivante montre exactement comment la reconnexion et le heartbeat vont fonctionner.</p>

@@ -1,0 +1,172 @@
+<h2>Design des Messages d'Erreur</h2>
+<p class="subtitle">Section 2/3 — Système de notifications contextuelles avec cause + suggestion d'action. 4 niveaux de sévérité.</p>
+
+<div class="mockup">
+  <div class="mockup-header">Exemples de messages d'erreur — tous les cas possibles</div>
+  <div class="mockup-body" style="background:#1a1e2e;font-family:'Consolas',monospace;font-size:11px;display:flex;flex-direction:column;gap:8px">
+
+    <!-- ERREUR CRITIQUE -->
+    <div>
+      <div style="color:#4c566a;font-size:8px;text-transform:uppercase;margin-bottom:4px">Niveau: ERREUR (rouge)</div>
+      <div style="background:#bf616a0d;border:1px solid #bf616a55;border-left:4px solid #bf616a;border-radius:5px;padding:9px 12px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="color:#bf616a;font-size:12px">✕</span>
+            <span style="color:#bf616a;font-weight:bold;font-size:10px">ERREUR — Connexion perdue</span>
+            <span style="background:#bf616a22;color:#bf616a;border-radius:3px;padding:1px 5px;font-size:8px">RÉSEAU</span>
+          </div>
+          <span style="color:#4c566a;font-size:9px">14:32:05</span>
+        </div>
+        <div style="color:#d8dee9;font-size:9px;margin-top:5px">
+          <span style="color:#4c566a">Client:</span> <span style="color:#88c0d0">192.168.1.10</span>
+          &nbsp;·&nbsp;
+          <span style="color:#4c566a">Opération:</span> <span style="color:#88c0d0">send_command</span>
+          &nbsp;·&nbsp;
+          <span style="color:#4c566a">Cause:</span> <span style="color:#ebcb8b">Connection reset by peer (errno 104)</span>
+        </div>
+        <div style="margin-top:5px;background:#bf616a0a;border-radius:4px;padding:5px 8px;display:flex;align-items:flex-start;gap:6px">
+          <span style="color:#88c0d0;font-size:9px">→</span>
+          <span style="color:#88c0d0;font-size:9px">Le client s'est déconnecté brutalement. Vérifier que le processus client tourne toujours sur la machine cible. Le client tentera de se reconnecter automatiquement.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- AVERTISSEMENT -->
+    <div>
+      <div style="color:#4c566a;font-size:8px;text-transform:uppercase;margin-bottom:4px">Niveau: AVERTISSEMENT (jaune)</div>
+      <div style="background:#ebcb8b0d;border:1px solid #ebcb8b44;border-left:4px solid #ebcb8b;border-radius:5px;padding:9px 12px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="color:#ebcb8b;font-size:12px">⚠</span>
+            <span style="color:#ebcb8b;font-weight:bold;font-size:10px">AVERTISSEMENT — Webcam indisponible</span>
+            <span style="background:#ebcb8b22;color:#ebcb8b;border-radius:3px;padding:1px 5px;font-size:8px">DÉPENDANCE</span>
+          </div>
+          <span style="color:#4c566a;font-size:9px">14:31:02</span>
+        </div>
+        <div style="color:#d8dee9;font-size:9px;margin-top:5px">
+          <span style="color:#4c566a">Client:</span> <span style="color:#88c0d0">192.168.1.15</span>
+          &nbsp;·&nbsp;
+          <span style="color:#4c566a">Opération:</span> <span style="color:#88c0d0">capture_webcam</span>
+          &nbsp;·&nbsp;
+          <span style="color:#4c566a">Cause:</span> <span style="color:#ebcb8b">Module opencv-python absent</span>
+        </div>
+        <div style="margin-top:5px;background:#ebcb8b0a;border-radius:4px;padding:5px 8px;display:flex;align-items:flex-start;gap:6px">
+          <span style="color:#88c0d0;font-size:9px">→</span>
+          <span style="color:#88c0d0;font-size:9px">Installer opencv sur le client cible: <span style="color:#a3be8c;background:#a3be8c11;padding:1px 4px;border-radius:3px">pip install opencv-python</span> puis reconnecter.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- TIMEOUT -->
+    <div>
+      <div style="color:#4c566a;font-size:8px;text-transform:uppercase;margin-bottom:4px">Niveau: AVERTISSEMENT — Timeout</div>
+      <div style="background:#ebcb8b0d;border:1px solid #ebcb8b44;border-left:4px solid #d08770;border-radius:5px;padding:9px 12px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="color:#d08770;font-size:12px">⏱</span>
+            <span style="color:#d08770;font-weight:bold;font-size:10px">TIMEOUT — Commande sans réponse</span>
+            <span style="background:#d0877022;color:#d08770;border-radius:3px;padding:1px 5px;font-size:8px">RÉSEAU</span>
+          </div>
+          <span style="color:#4c566a;font-size:9px">14:35:20</span>
+        </div>
+        <div style="color:#d8dee9;font-size:9px;margin-top:5px">
+          <span style="color:#4c566a">Client:</span> <span style="color:#88c0d0">192.168.1.10</span>
+          &nbsp;·&nbsp;
+          <span style="color:#4c566a">Commande:</span> <span style="color:#88c0d0">whoami</span>
+          &nbsp;·&nbsp;
+          <span style="color:#4c566a">Délai:</span> <span style="color:#ebcb8b">15 secondes dépassées</span>
+        </div>
+        <div style="margin-top:5px;background:#d087700a;border-radius:4px;padding:5px 8px;display:flex;align-items:flex-start;gap:6px">
+          <span style="color:#88c0d0;font-size:9px">→</span>
+          <span style="color:#88c0d0;font-size:9px">Connexion lente ou client bloqué. Augmenter le timeout dans <span style="color:#a3be8c">Paramètres → Réseau → Timeout</span>, ou vérifier l'activité réseau.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- PERMISSION REFUSÉE -->
+    <div>
+      <div style="color:#4c566a;font-size:8px;text-transform:uppercase;margin-bottom:4px">Niveau: ERREUR — Permission</div>
+      <div style="background:#bf616a0d;border:1px solid #bf616a44;border-left:4px solid #bf616a;border-radius:5px;padding:9px 12px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="color:#bf616a;font-size:12px">🔒</span>
+            <span style="color:#bf616a;font-weight:bold;font-size:10px">ERREUR — Permission refusée</span>
+            <span style="background:#bf616a22;color:#bf616a;border-radius:3px;padding:1px 5px;font-size:8px">FICHIER</span>
+          </div>
+          <span style="color:#4c566a;font-size:9px">14:38:11</span>
+        </div>
+        <div style="color:#d8dee9;font-size:9px;margin-top:5px">
+          <span style="color:#4c566a">Client:</span> <span style="color:#88c0d0">192.168.1.15</span>
+          &nbsp;·&nbsp;
+          <span style="color:#4c566a">Opération:</span> <span style="color:#88c0d0">download_file</span>
+          &nbsp;·&nbsp;
+          <span style="color:#4c566a">Chemin:</span> <span style="color:#ebcb8b">/etc/shadow</span>
+          &nbsp;·&nbsp;
+          <span style="color:#4c566a">Cause:</span> <span style="color:#ebcb8b">Permission denied (errno 13)</span>
+        </div>
+        <div style="margin-top:5px;background:#bf616a0a;border-radius:4px;padding:5px 8px;display:flex;align-items:flex-start;gap:6px">
+          <span style="color:#88c0d0;font-size:9px">→</span>
+          <span style="color:#88c0d0;font-size:9px">Le client n'a pas les droits nécessaires sur ce fichier. Vérifier que le processus client tourne en root/admin, ou choisir un fichier accessible.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- SUCCÈS -->
+    <div>
+      <div style="color:#4c566a;font-size:8px;text-transform:uppercase;margin-bottom:4px">Niveau: SUCCÈS (vert)</div>
+      <div style="background:#a3be8c0d;border:1px solid #a3be8c44;border-left:4px solid #a3be8c;border-radius:5px;padding:9px 12px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="color:#a3be8c;font-size:12px">✓</span>
+            <span style="color:#a3be8c;font-weight:bold;font-size:10px">SUCCÈS — Fichier téléchargé</span>
+            <span style="background:#a3be8c22;color:#a3be8c;border-radius:3px;padding:1px 5px;font-size:8px">FICHIER</span>
+          </div>
+          <span style="color:#4c566a;font-size:9px">14:40:03</span>
+        </div>
+        <div style="color:#d8dee9;font-size:9px;margin-top:5px">
+          <span style="color:#4c566a">Client:</span> <span style="color:#88c0d0">192.168.1.10</span>
+          &nbsp;·&nbsp;
+          <span style="color:#4c566a">Fichier:</span> <span style="color:#88c0d0">C:\Users\user\passwords.txt</span>
+          &nbsp;·&nbsp;
+          <span style="color:#4c566a">Taille:</span> <span style="color:#a3be8c">2.4 KB</span>
+          &nbsp;·&nbsp;
+          <span style="color:#4c566a">Durée:</span> <span style="color:#a3be8c">0.3s</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- INFO -->
+    <div>
+      <div style="color:#4c566a;font-size:8px;text-transform:uppercase;margin-bottom:4px">Niveau: INFO (bleu)</div>
+      <div style="background:#5e81ac0d;border:1px solid #5e81ac44;border-left:4px solid #5e81ac;border-radius:5px;padding:9px 12px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="color:#5e81ac;font-size:12px">ℹ</span>
+            <span style="color:#5e81ac;font-weight:bold;font-size:10px">INFO — Keylogger démarré</span>
+            <span style="background:#5e81ac22;color:#5e81ac;border-radius:3px;padding:1px 5px;font-size:8px">SURVEILLANCE</span>
+          </div>
+          <span style="color:#4c566a;font-size:9px">14:41:30</span>
+        </div>
+        <div style="color:#d8dee9;font-size:9px;margin-top:5px">
+          <span style="color:#4c566a">Client:</span> <span style="color:#88c0d0">192.168.1.10</span>
+          &nbsp;·&nbsp;
+          <span style="color:#4c566a">Opération:</span> <span style="color:#88c0d0">start_keylogger</span>
+          &nbsp;·&nbsp;
+          <span style="color:#4c566a">Statut:</span> <span style="color:#88c0d0">Enregistrement en cours</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="section" style="margin-top:16px">
+  <h3>Structure d'un message d'erreur</h3>
+  <div style="background:var(--bg-secondary,#1a1f2e);border-radius:6px;padding:12px;font-size:12px;color:#d8dee9">
+    <div style="margin-bottom:6px"><span style="color:#88c0d0">Ligne 1:</span> icône + niveau (ERREUR/AVERTISSEMENT/SUCCÈS/INFO) + titre court + badge catégorie (RÉSEAU / FICHIER / DÉPENDANCE / SURVEILLANCE) + horodatage</div>
+    <div style="margin-bottom:6px"><span style="color:#88c0d0">Ligne 2:</span> Client IP · Opération · Cause exacte (errno, module manquant, chemin, etc.)</div>
+    <div><span style="color:#88c0d0">Ligne 3:</span> Suggestion d'action concrète avec commande ou chemin cliquable si applicable</div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top:12px">Ce système de messages d'erreur te convient ? Réponds dans le terminal pour passer à la section 3/3 (dark theme modernisé).</p>

